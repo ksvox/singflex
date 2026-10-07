@@ -1,8 +1,9 @@
+import { handle } from '../../../lib/handle';
 import { db } from '../../../lib/firebaseAdmin';
 import { isAdmin } from '../../../lib/pass';
 
 // 門弟アプリに登録済みの歌詞PDFを取り出す
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (!(await isAdmin(req))) return res.status(401).json({ error: 'admin' });
   const id = String(req.query.id || '');
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return res.status(400).end();
@@ -11,3 +12,4 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/pdf');
   res.send(Buffer.from(snap.docs.map((d) => d.data().data).join(''), 'base64'));
 }
+export default handle(handler);

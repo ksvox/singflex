@@ -125,7 +125,7 @@ export default function Home() {
         <FontButton className="abs" style={{ right: 12, top: 10, position: 'absolute' }} />
 
         {access === 'locked' && (
-          <div className="abs lock">※このアプリは門下生専用です。<br /><a href="https://montei.ksvox.net">門弟アプリ</a>の「SingFlex」ボタンから開いてください。</div>
+          <div className="abs lock">このアプリは門下生専用です。<br /><a href="https://montei.ksvox.net">門弟アプリ</a>の「SingFlex」ボタンから開いてください。</div>
         )}
         {access === 'checking' && <div className="abs lock">読み込み中…</div>}
 

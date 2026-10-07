@@ -1,7 +1,8 @@
+import { handle } from '../../../lib/handle';
 import { db, SONGS } from '../../../lib/firebaseAdmin';
 import { isAdmin } from '../../../lib/pass';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (!(await isAdmin(req))) return res.status(401).json({ error: 'admin' });
   const snap = await db().collection(SONGS).get();
   const songs = snap.docs.map((d) => {
@@ -15,3 +16,4 @@ export default async function handler(req, res) {
   songs.sort((a, b) => a.title.localeCompare(b.title));
   res.json({ songs });
 }
+export default handle(handler);

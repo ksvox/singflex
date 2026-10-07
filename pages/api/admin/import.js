@@ -1,10 +1,11 @@
+import { handle } from '../../../lib/handle';
 import { db, SONGS } from '../../../lib/firebaseAdmin';
 import { isAdmin } from '../../../lib/pass';
 
 const display = (t) => String(t || '').replace(/-\s*\([^()]+\)\s*$/, '').trim();
 
 // 門弟アプリの楽曲(songs)から、曲名とEP名をSingFlexに取り込む(IDは同じものを使う)
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (!(await isAdmin(req))) return res.status(401).json({ error: 'admin' });
   const [src, mine] = await Promise.all([db().collection('songs').get(), db().collection(SONGS).get()]);
   const have = new Set(mine.docs.map((d) => d.id));
@@ -18,3 +19,4 @@ export default async function handler(req, res) {
   if (added) await batch.commit();
   res.json({ added, total: src.size });
 }
+export default handle(handler);

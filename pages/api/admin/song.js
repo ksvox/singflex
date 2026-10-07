@@ -1,10 +1,11 @@
+import { handle } from '../../../lib/handle';
 import { db, SONGS, getAdmin } from '../../../lib/firebaseAdmin';
 import { isAdmin } from '../../../lib/pass';
 
 const ALLOWED = ['title', 'ep', 'ready', 'vocalKey', 'trackKey', 'jacketKey', 'lines', 'chords', 'jp', 'timed', 'rawLyrics'];
 
 // 作成(idなし)・更新(idあり)・削除(DELETE)
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (!(await isAdmin(req))) return res.status(401).json({ error: 'admin' });
   const col = db().collection(SONGS);
   if (req.method === 'GET') { const d = await col.doc(req.query.id).get(); return res.json(d.exists ? { id: d.id, ...d.data() } : null); }
@@ -19,4 +20,5 @@ export default async function handler(req, res) {
   const ref = await col.add({ ready: false, ...data });
   res.json({ id: ref.id });
 }
+export default handle(handler);
 export const config = { api: { bodyParser: { sizeLimit: '2mb' } } };

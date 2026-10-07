@@ -10,7 +10,7 @@ function Panel() {
   const [busy, setBusy] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [orphans, setOrphans] = useState([]);
-  const load = () => adminFetch('/api/admin/songs').then((j) => setSongs(j.songs));
+  const load = () => adminFetch('/api/admin/songs').then((j) => setSongs(j.songs)).catch((e) => setLog('曲の一覧を読み込めませんでした: ' + e.message + '\n'));
   useEffect(() => { load(); }, []);
   const say = (s) => setLog((l) => l + s + '\n');
 
@@ -59,14 +59,14 @@ function Panel() {
       <h2>門弟アプリの楽曲を取り込む</h2>
       <div className="card row">
         <span style={{ flex: 1, minWidth: 200 }}>門弟アプリに登録済みの曲名・EP名をSingFlexに取り込みます(新しい曲だけ追加されます)。</span>
-        <button className="btn pri" disabled={busy} onClick={async () => { setBusy(true); const r = await adminFetch('/api/admin/import', { method: 'POST' }); say(`門弟アプリから ${r.added} 曲を取り込みました`); setBusy(false); load(); }}>取り込む</button>
+        <button className="btn pri" disabled={busy} onClick={async () => { setBusy(true); setLog(''); try { const r = await adminFetch('/api/admin/import', { method: 'POST' }); say(`門弟アプリから ${r.added} 曲を取り込みました(門弟アプリの曲数: ${r.total})`); } catch (e) { say('取り込めませんでした: ' + e.message); } setBusy(false); load(); }}>取り込む</button>
       </div>
 
       <h2>音源とジャケットを一括登録</h2>
       <div className="card">
         <p>分離ソフトで書き出したMP3(「曲名_(Vocals)」「曲名_(Instrumental)」)と、曲名(EPならEP名)のジャケット画像をまとめて選んでください。ジャケットは自動で小さくしてから保存します。</p>
         <input type="file" multiple accept="audio/*,image/*" disabled={busy} onChange={(e) => bulk([...e.target.files])} />
-        {busy && <div className="msg">登録中です。画面を閉じないでください…</div>}
+        {busy && <div className="msg">処理中です。画面を閉じないでください…</div>}
         {log && <div className="msg">{log}</div>}
         {orphans.map((f) => (
           <div key={f.name} className="row" style={{ marginTop: 8 }}>
