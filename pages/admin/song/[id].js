@@ -4,7 +4,7 @@ import Link from 'next/link';
 import AdminGate from '../../../components/AdminGate';
 import { adminFetch, adminHeaders } from '../../../lib/client/firebaseClient';
 import { saveSong, uploadTo, resizeJacket, adminAudio } from '../../../lib/client/admin';
-import { cleanLyrics, textToLines, linesToText, vocalEnvelope, placeRepeats, fillSections } from '../../../lib/client/lyrics';
+import { cleanLyrics, textToLines, linesToText, vocalEnvelope, placeRepeats, fillSections, nextOnset } from '../../../lib/client/lyrics';
 import { estimateChords } from '../../../lib/client/chords';
 import { pdfText } from '../../../lib/client/pdf';
 import { fmt } from '../../../lib/client/song';
@@ -85,6 +85,13 @@ function Editor({ id }) {
     setTapIdx(i);
     if (player.current) startAt(resumeFrom(i));
   };
+  // 次の歌い出しの1.5秒前へ飛ぶ
+  const skip = () => {
+    if (!player.current) return;
+    const nx = nextOnset(env(), player.current.now());
+    if (nx == null) { setMsg('この先に歌い出しは見つかりませんでした。'); return; }
+    startAt(nx - 1.5);
+  };
   const firstEmpty = (ls) => { const k = ls.findIndex((l) => l.t == null && (!secMode || l.start)); return k < 0 ? ls.length - 1 : k; };
   const env = () => { if (!envRef.current) envRef.current = vocalEnvelope(aud.vocal); return envRef.current; };
   const autoFill = () => {
@@ -114,6 +121,7 @@ function Editor({ id }) {
       if (e.repeat) return;
       if (!player.current) startAt(resumeFrom(tapIdx)); else tap(Math.max(0, (performance.now() - e.timeStamp) / 1000));
     } else if (e.code === 'ArrowLeft') { e.preventDefault(); back(); }
+    else if (e.code === 'ArrowRight') { e.preventDefault(); skip(); }
     else if (e.code === 'Escape') { stop(); setT((x) => x); }
   };
   useEffect(() => {
@@ -192,7 +200,7 @@ function Editor({ id }) {
         <p style={{ marginBottom: 4 }}>和訳(ワンコーラス分・控え室に表示)</p>
         <textarea value={jp} onChange={(e) => setJp(e.target.value)} style={{ minHeight: 140, fontFamily: 'inherit' }} />
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn pri" onClick={() => { const nl = textToLines(text, s.lines || []); save({ lines: nl, jp, timed: nl.every((l) => l.t != null) }, '歌詞を保存しました'); }}>歌詞を保存</button>
+          <button className="btn pri" onClick={() => { const nl = textToLines(text, lines.length ? lines : (s.lines || [])); save({ lines: nl, jp, timed: nl.every((l) => l.t != null) }, '歌詞を保存しました'); }}>歌詞を保存</button>
         </div>
       </div>
 
@@ -204,9 +212,11 @@ function Editor({ id }) {
           <div style={{ fontSize: 13, background: '#fff8ea', border: '1px solid #eadfcd', borderRadius: 8, padding: '8px 12px', marginBottom: 10, lineHeight: 1.7 }}>
             <b>記録のしかた</b><br />
             ① 「楽段の頭だけ記録」をオンにして<b>スペースキー</b>で再生。[Verse] や [Chorus] の1行目の歌い出しでスペースを押します(楽段の数だけ叩けば終わり)。<br />
+            ・楽段の頭を叩いたら <b>→キー</b> で次の歌い出しの1.5秒前へ飛べます。次の楽段の手前まで何回か押して、そこで叩いてください。<br />
             ② 「楽段の中を自動で割り振り」を押すと、楽段の中の行に時間が入ります。<br />
             ③ 「最初から再生(確認)」で流し聴きして、ずれた行だけ ▶ と ±0.1 で直すか、「ここから記録」でタップし直します。<br />
             ・叩き損ねたら <b>←キー</b> で戻って少し前から再生し直します。<b>Esc</b> で停止。<br />
+            ・歌詞を直して保存しても、変わっていない行と、言葉を直しただけの行のタイミングは残ります。<br />
             ・「楽段の頭だけ記録」をオフにすると、全部の行を1行ずつ記録できます。
           </div>
           {chordMsg && <div className="msg" style={{ marginBottom: 8 }}>{chordMsg}</div>}
@@ -248,7 +258,7 @@ function Editor({ id }) {
                 {lines[tapIdx]?.start && lines[tapIdx]?.sec ? <span style={{ fontSize: 14, color: '#7a3d21' }}>[{lines[tapIdx].sec}] </span> : null}{lines[tapIdx]?.text || ''}
               </div>
               <div style={{ fontSize: 15, color: '#7a6a54', minHeight: 20 }}>{lines[tapIdx + 1]?.text || '(最後の行)'}</div>
-              <div style={{ fontSize: 12, color: '#7a6a54', marginTop: 4 }}>{tapIdx + 1} / {lines.length} 行目{secMode ? '(楽段の頭だけ)' : ''} ・ スペース=歌い出し ← =1行戻る Esc=停止</div>
+              <div style={{ fontSize: 12, color: '#7a6a54', marginTop: 4 }}>{tapIdx + 1} / {lines.length} 行目{secMode ? '(楽段の頭だけ)' : ''} ・ スペース=歌い出し → =次の歌い出しへ ← =戻る Esc=停止</div>
             </div>
             <button className="btn pri tap" onClick={() => { if (!player.current) startAt(resumeFrom(tapIdx)); else tap(0); }}>{player.current ? 'この行の歌い出し!' : 'ここから再生して記録'}</button>
             <div className="row" style={{ marginTop: 8 }}><button className="btn pri" onClick={() => save({ lines, timed: lines.every((l) => l.t != null) }, 'タイミングを保存しました')}>タイミングを保存</button></div>
