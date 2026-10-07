@@ -21,6 +21,10 @@ function Editor({ id }) {
   const [tapIdx, setTapIdx] = useState(0);
   const [secMode, setSecMode] = useState(true);
   const [chordMsg, setChordMsg] = useState('');
+  const [playRow, setPlayRow] = useState(null);
+  const [seekV, setSeekV] = useState(null);
+  const [busyKey, setBusyKey] = useState(null);
+  const [doneKey, setDoneKey] = useState(null);
   const player = useRef(null);
   const envRef = useRef(null);
   const keyRef = useRef(null);
@@ -34,6 +38,18 @@ function Editor({ id }) {
   useEffect(() => { load(); return () => stop(); }, [id]);
 
   const save = async (data, note = '保存しました') => { await saveSong({ id, ...data }); setMsg(note); load(); };
+  // ボタンの「処理中…」「✓ 完了」表示
+  const act = async (key, fn) => {
+    if (busyKey) return;
+    setBusyKey(key);
+    try { await fn(); setDoneKey(key); setTimeout(() => setDoneKey((k) => (k === key ? null : k)), 2200); }
+    catch (e) { setMsg(e.message); }
+    setBusyKey(null);
+  };
+  const lbl = (key, label, done = '✓ 完了') => (busyKey === key ? '処理中…' : doneKey === key ? done : label);
+  const bcls = (key, base = 'btn') => base + (doneKey === key ? ' done' : '');
+  // お知らせは数秒で消える(「…」で終わる途中経過は残す)
+  useEffect(() => { if (!msg || msg.endsWith('…')) return; const tm = setTimeout(() => setMsg(''), 5000); return () => clearTimeout(tm); }, [msg]);
 
   // ---- 簡易プレーヤー(タイミング付け用)----
   const startAt = (off) => {
@@ -44,13 +60,21 @@ function Editor({ id }) {
     const timer = setInterval(() => setT(ctx.currentTime - t0), 50);
     player.current = { ctx, srcs, timer, now: () => ctx.currentTime - t0 };
   };
-  function stop() { const p = player.current; if (p) { clearInterval(p.timer); p.srcs.forEach((n) => { try { n.stop(); } catch {} }); p.ctx.close(); player.current = null; } }
+  function stop() { const p = player.current; setPlayRow(null); if (p) { clearInterval(p.timer); p.srcs.forEach((n) => { try { n.stop(); } catch {} }); p.ctx.close(); player.current = null; setT((x) => x + 0); } }
+  const seekBy = (d) => { if (player.current) startAt(Math.max(0, player.current.now() + d)); };
+  // 各行の ▶:1回目で再生、2回目で停止
+  const togglePlay = (i) => {
+    if (player.current && playRow === i) { stop(); return; }
+    const l = lines[i];
+    startAt(l.t != null ? Math.max(0, l.t - 1.5) : resumeFrom(i));
+    setPlayRow(i);
+  };
   const loadAudio = async () => {
     setMsg('音源を読み込み中…');
     const [vocal, track] = await Promise.all([adminAudio(s.vocalKey), adminAudio(s.trackKey)]);
     setAud({ vocal, track }); setMsg('音源を読み込みました');
     // コードが未保存なら、裏で推定して自動保存(タイミングの作業はそのまま続けられます)
-    if (!(s.chords && s.chords.length)) {
+    if (!(s.chords && s.chords.length)) (async () => {
       try {
         setChordMsg('コードを推定中…(終わると自動で保存します)');
         const cs = await estimateChords(track, (p) => setChordMsg(`コードを推定中… ${Math.round(p * 100)}%(終わると自動で保存します)`));
@@ -59,7 +83,7 @@ function Editor({ id }) {
         setS((x) => ({ ...x, chords: cs }));
         setChordMsg('コードを推定して保存しました。おかしな所は下で直して「コードを保存」を押してください。');
       } catch (e) { setChordMsg('コードを推定できませんでした: ' + e.message); }
-    }
+    })();
   };
   // ---- タップ記録 ----
   // 次に記録する行:楽段の頭を叩いたら次の楽段の頭へ/楽段の途中の行(手直し)を叩いたらすぐ下の行へ
@@ -82,28 +106,22 @@ function Editor({ id }) {
   // すぐ上の行がまだ空欄なら、記録済みの楽段から「1音節あたりの秒数」を出して、だいたいの位置を見積もる
   const resumeFrom = (i) => {
     if (i <= 0) return 0;
-    const prevT = lines[i - 1].t;
-    let st;
-    if (prevT != null) st = prevT - 1;
-    else {
-      let k = i - 1; while (k >= 0 && lines[k].t == null) k--;
-      if (k < 0) return 0;
-      // この曲の歌う速さ(記録済みの楽段の頭どうしの間隔 ÷ その間の音節数)
-      const heads = lines.map((l, x) => ({ l, x })).filter((o) => o.l.t != null);
-      // 間奏などで遅く見積もって行きすぎないよう、いちばん速い楽段の速さを使う
-      const rates = [];
-      for (let h = 0; h + 1 < heads.length; h++) {
-        const a = heads[h]; const b = heads[h + 1];
-        let n = 0; for (let x = a.x; x < b.x; x++) n += syllables(lines[x].text);
-        if (n >= 8 && b.l.t > a.l.t) rates.push((b.l.t - a.l.t) / n);
-      }
-      const rate = rates.length ? Math.min(...rates) : 0.28;
-      let n = 0; for (let x = k; x < i; x++) n += syllables(lines[x].text);
-      st = lines[k].t + n * rate - 3;
-      st = Math.max(lines[k].t, st);
+    // その行とすぐ上の行のうち、早いほうの時間の3秒前(どちらかがずれていても、叩きたい所より後から始まらない)
+    const known = [lines[i].t, lines[i - 1].t].filter((v) => v != null);
+    if (known.length) return Math.max(0, Math.min(...known) - 3);
+    // どちらも空欄なら、記録済みの楽段から歌う速さを出して見積もる
+    let k = i - 1; while (k >= 0 && lines[k].t == null) k--;
+    if (k < 0) return 0;
+    const heads = lines.map((l, x) => ({ l, x })).filter((o) => o.l.t != null);
+    const rates = [];
+    for (let h = 0; h + 1 < heads.length; h++) {
+      const a = heads[h]; const b = heads[h + 1];
+      let n = 0; for (let x = a.x; x < b.x; x++) n += syllables(lines[x].text);
+      if (n >= 8 && b.l.t > a.l.t) rates.push((b.l.t - a.l.t) / n);
     }
-    if (lines[i].t != null && lines[i].t - st > 8) st = lines[i].t - 4;
-    return Math.max(0, st);
+    const rate = rates.length ? Math.min(...rates) : 0.28;
+    let n = 0; for (let x = k; x < i; x++) n += syllables(lines[x].text);
+    return Math.max(lines[k].t, lines[k].t + n * rate - 3);
   };
   const back = () => {
     let i = Math.max(0, tapIdx - 1);
@@ -134,7 +152,9 @@ function Editor({ id }) {
       if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
       if (e.repeat) return;
       if (!player.current) startAt(resumeFrom(tapIdx)); else tap(Math.max(0, (performance.now() - e.timeStamp) / 1000));
-    } else if (e.code === 'ArrowLeft') { e.preventDefault(); back(); }
+    } else if (e.code === 'ArrowLeft') { e.preventDefault(); seekBy(-3); }
+    else if (e.code === 'ArrowRight') { e.preventDefault(); seekBy(3); }
+    else if (e.code === 'Backspace') { e.preventDefault(); back(); }
     else if (e.code === 'Escape') { stop(); setT((x) => x); }
   };
   useEffect(() => {
@@ -156,14 +176,14 @@ function Editor({ id }) {
     <>
       <p><Link href="/admin">← 曲の一覧</Link></p>
       <h1>{s.title}</h1>
-      {msg && <div className="msg">{msg}</div>}
+      {msg && <div className="toast">{msg}</div>}
 
       <h2>基本情報</h2>
       <div className="card">
         <label>曲名<input type="text" defaultValue={s.title} id="f-title" /></label>
         <label style={{ display: 'block', marginTop: 8 }}>EP名(EP収録曲のみ)<input type="text" defaultValue={s.ep || ''} id="f-ep" /></label>
         <div className="row" style={{ marginTop: 10 }}>
-          <button className="btn" onClick={() => save({ title: document.getElementById('f-title').value.trim(), ep: document.getElementById('f-ep').value.trim() })}>保存</button>
+          <button className={bcls('info')} disabled={!!busyKey} onClick={() => act('info', () => save({ title: document.getElementById('f-title').value.trim(), ep: document.getElementById('f-ep').value.trim() }))}>{lbl('info', '保存', '✓ 保存済み')}</button>
           <label className="row" style={{ marginLeft: 'auto' }}><input type="checkbox" checked={!!s.ready} onChange={(e) => save({ ready: e.target.checked }, e.target.checked ? '公開しました(生徒の一覧に出ます)' : '非公開にしました')} />生徒に公開する</label>
         </div>
       </div>
@@ -188,16 +208,16 @@ function Editor({ id }) {
       <h2>歌詞と和訳</h2>
       <div className="card">
         <div className="row" style={{ marginBottom: 8 }}>
-          <button className="btn pri" onClick={async () => {
+          <button className={bcls('pdf', 'btn pri')} disabled={!!busyKey} onClick={() => act('pdf', async () => {
             setMsg('門弟アプリの歌詞PDFを読み込み中…');
-            try {
+            {
               const r = await fetch('/api/admin/pdf?id=' + id, { headers: await adminHeaders() });
-              if (!r.ok) { setMsg('この曲の歌詞PDFは門弟アプリに登録されていません。下からPDFファイルを選んでください。'); return; }
+              if (!r.ok) throw new Error('この曲の歌詞PDFは門弟アプリに登録されていません。下からPDFファイルを選んでください。');
               const raw = await pdfText(await r.blob());
               const c = cleanLyrics(raw, s.title); setText(c.text); setJp(c.jp);
               setMsg('読み込みました。折り返し・繰り返し・和訳の分かれ方を確認して「歌詞を保存」を押してください。');
-            } catch (e) { setMsg('読み込めませんでした: ' + e.message); }
-          }}>門弟アプリの歌詞PDFから読み込む</button>
+            }
+          })}>{lbl('pdf', '門弟アプリの歌詞PDFから読み込む', '✓ 読み込みました')}</button>
         </div>
         <div className="row"><span>PDFファイルを選んで読み込む:</span>
           <input type="file" accept="application/pdf" onChange={async (e) => {
@@ -213,21 +233,22 @@ function Editor({ id }) {
         <p style={{ marginBottom: 4 }}>和訳(ワンコーラス分・控え室に表示)</p>
         <textarea value={jp} onChange={(e) => setJp(e.target.value)} style={{ minHeight: 140, fontFamily: 'inherit' }} />
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn pri" onClick={() => { const nl = textToLines(text, lines.length ? lines : (s.lines || [])); save({ lines: nl, jp, timed: nl.every((l) => l.t != null) }, '歌詞を保存しました'); }}>歌詞を保存</button>
+          <button className={bcls('lyr', 'btn pri')} disabled={!!busyKey} onClick={() => act('lyr', () => { const nl = textToLines(text, lines.length ? lines : (s.lines || [])); return save({ lines: nl, jp, timed: nl.every((l) => l.t != null) }, '歌詞を保存しました'); })}>{lbl('lyr', '歌詞を保存', '✓ 保存済み')}</button>
         </div>
       </div>
 
       <h2>歌詞のタイミング</h2>
       <div className="card">
         {!can && <p>先にボーカルと伴奏を登録してください。</p>}
-        {can && !aud && <button className="btn" onClick={loadAudio}>音源を読み込む</button>}
+        {can && !aud && <button className="btn pri" disabled={!!busyKey} onClick={() => act('aud', loadAudio)}>{busyKey === 'aud' ? '音源を読み込み中…' : '音源を読み込む'}</button>}
         {aud && (<>
           <div style={{ fontSize: 13, background: '#fff8ea', border: '1px solid #eadfcd', borderRadius: 8, padding: '8px 12px', marginBottom: 10, lineHeight: 1.7 }}>
             <b>記録のしかた(3ステップ)</b><br />
             ① <b>楽段の頭を記録</b>:「最初から記録」を押し、[Verse] や [Chorus] の1行目の歌い出しで<b>スペースキー</b>。楽段の数だけ叩けば終わりです。途中で止めたら、次に叩く楽段の「ここから記録」→ スペースキーで、すぐ上の行の少し前から再生が始まります。<br />
             ② <b>楽段の中を自動で割り振り</b>:ボタンを押すと、楽段の中の行に時間が入ります。<br />
             ③ <b>ずれた行を直す</b>:「最初から再生(確認)」で流し聴きし、ずれた行は ±0.1 で直すか、その行の「ここから記録」→ スペースキー(再生開始)→ 歌い出しでスペースキー → Esc で止める。<br />
-            ・叩き損ねたら <b>←キー</b> で1つ戻って少し前から再生し直します。最後に「タイミングを保存」を忘れずに。
+            ・再生中は <b>←→キー</b> で3秒戻す/進める、画面下のバーで好きな位置から再生できます(次に叩く行は変わりません)。<br />
+            ・叩き損ねたら <b>Backspaceキー</b> で1つ戻ります。各行の ▶ は押すたびに再生/停止。最後に「タイミングを保存」を忘れずに。
           </div>
           {chordMsg && <div className="msg" style={{ marginBottom: 8 }}>{chordMsg}</div>}
           <div className="row" style={{ marginBottom: 8 }}>
@@ -235,8 +256,8 @@ function Editor({ id }) {
           </div>
           <div className="row">
             <button className="btn" onClick={recordFromStart}>① 最初から記録</button>
-            <button className="btn pri" onClick={autoFill}>② 楽段の中を自動で割り振り</button>
-            <button className="btn" onClick={() => startAt(0)}>③ 最初から再生(確認)</button>
+            <button className={bcls('fill', 'btn pri')} onClick={() => { autoFill(); setDoneKey('fill'); setTimeout(() => setDoneKey((k) => (k === 'fill' ? null : k)), 2200); }}>{doneKey === 'fill' ? '✓ 割り振りました' : '② 楽段の中を自動で割り振り'}</button>
+            <button className={'btn' + (player.current && playRow === -1 ? ' play-on' : '')} onClick={() => { if (player.current && playRow === -1) { stop(); return; } startAt(0); setPlayRow(-1); }}>{player.current && playRow === -1 ? '■ 確認の再生を止める' : '③ 最初から再生(確認)'}</button>
             <button className="btn" onClick={stop}>停止</button>
             <span className="mono">{fmt(t)}</span>
           </div>
@@ -248,8 +269,8 @@ function Editor({ id }) {
                 <span className="row" style={{ gap: 4 }}>
                   <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => nudge(i, -0.1)}>-0.1</button>
                   <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => nudge(i, 0.1)}>+0.1</button>
-                  <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => startAt(l.t != null ? l.t - 1.5 : resumeFrom(i))}>▶</button>
-                  <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => setTapIdx(i)}>ここから記録</button>
+                  <button className={'btn' + (player.current && playRow === i ? ' play-on' : '')} style={{ minHeight: 34, padding: '0 10px' }} title="押すたびに再生/停止" onClick={() => togglePlay(i)}>{player.current && playRow === i ? '■' : '▶'}</button>
+                  <button className={'btn' + (i === tapIdx ? ' play-on' : '')} style={{ minHeight: 34, padding: '0 8px' }} onClick={() => { setTapIdx(i); setMsg(`${i + 1}行目を「次に叩く行」にしました。スペースキーで少し前から再生します。`); }}>ここから記録</button>
                 </span>
               </div>
             ))}
@@ -262,24 +283,33 @@ function Editor({ id }) {
                 {lines[tapIdx]?.start && lines[tapIdx]?.sec ? <span style={{ fontSize: 14, color: '#7a3d21' }}>[{lines[tapIdx].sec}] </span> : null}{lines[tapIdx]?.text || ''}
               </div>
               <div style={{ fontSize: 15, color: '#7a6a54', minHeight: 20 }}>{lines[tapIdx + 1]?.text || '(最後の行)'}</div>
-              <div style={{ fontSize: 12, color: '#7a6a54', marginTop: 4 }}>{tapIdx + 1} / {lines.length} 行目 ・ スペース=歌い出し ← =1つ戻る Esc=停止</div>
+              <div style={{ fontSize: 12, color: '#7a6a54', marginTop: 4 }}>{tapIdx + 1} / {lines.length} 行目 ・ スペース=再生/歌い出し ←→ =3秒戻す/進める Backspace=1つ戻る Esc=停止</div>
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+              <span className="mono" style={{ fontSize: 12 }}>{fmt(seekV ?? t)}</span>
+              <input type="range" className="seek" min={0} max={Math.floor(aud.vocal.duration)} step={0.1} value={seekV ?? t}
+                onChange={(e) => setSeekV(Number(e.target.value))}
+                onPointerUp={(e) => { const v = Number(e.target.value); setSeekV(null); startAt(v); }}
+                onKeyUp={(e) => { const v = Number(e.target.value); setSeekV(null); startAt(v); }} />
+              <span className="mono" style={{ fontSize: 12 }}>{fmt(aud.vocal.duration)}</span>
             </div>
             <button className="btn pri tap" onClick={() => { if (!player.current) startAt(resumeFrom(tapIdx)); else tap(0); }}>{player.current ? 'この行の歌い出し!' : 'ここから再生して記録'}</button>
-            <div className="row" style={{ marginTop: 8 }}><button className="btn pri" onClick={() => save({ lines, timed: lines.every((l) => l.t != null) }, 'タイミングを保存しました')}>タイミングを保存</button></div>
+            <div className="row" style={{ marginTop: 8 }}><button className={bcls('tim', 'btn pri')} disabled={!!busyKey} onClick={() => act('tim', () => save({ lines, timed: lines.every((l) => l.t != null) }, 'タイミングを保存しました'))}>{lbl('tim', 'タイミングを保存', '✓ 保存済み')}</button></div>
           </div>
         </>)}
       </div>
 
       <h2>コード(参考表示)</h2>
       <div className="card">
-        {aud ? <button className="btn" onClick={async () => { setMsg('コードを推定中…(1〜2分かかります)'); const cs = await estimateChords(aud.track, (p) => setMsg(`コードを推定中… ${Math.round(p * 100)}%`)); setChordTxt(cs.map((c) => `${c.t} ${c.c}`).join('\n')); setMsg('推定しました。おかしな所は直して保存してください(秒数 コード名)。'); }}>伴奏からコードを推定</button>
+        {aud ? <button className={bcls('chordEst')} disabled={!!busyKey} onClick={() => act('chordEst', async () => { setChordMsg('コードを推定中…(1〜2分かかります)'); const cs = await estimateChords(aud.track, (p) => setChordMsg(`コードを推定中… ${Math.round(p * 100)}%`)); setChordTxt(cs.map((c) => `${c.t} ${c.c}`).join('\n')); setChordMsg('推定しました。おかしな所は直して「コードを保存」を押してください(秒数 コード名)。'); })}>{lbl('chordEst', '伴奏からコードを推定し直す', '✓ 推定しました')}</button>
           : <p>上の「音源を読み込む」の後に推定できます。</p>}
+        {chordMsg && <div className="msg">{chordMsg}</div>}
         <textarea value={chordTxt} onChange={(e) => setChordTxt(e.target.value)} style={{ minHeight: 160, marginTop: 8 }} placeholder={'12.4 Am\n14.2 F'} />
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn pri" onClick={() => {
+          <button className={bcls('chordSave', 'btn pri')} disabled={!!busyKey} onClick={() => act('chordSave', () => {
             const cs = chordTxt.split('\n').map((r) => r.trim().split(/\s+/)).filter((p) => p.length >= 2 && !isNaN(Number(p[0]))).map((p) => ({ t: Number(p[0]), c: p[1] })).sort((a, b) => a.t - b.t);
-            save({ chords: cs }, 'コードを保存しました');
-          }}>コードを保存</button>
+            return save({ chords: cs }, 'コードを保存しました');
+          })}>{lbl('chordSave', 'コードを保存', '✓ 保存済み')}</button>
         </div>
       </div>
 
