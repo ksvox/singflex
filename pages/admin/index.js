@@ -10,6 +10,8 @@ function Panel() {
   const [busy, setBusy] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [orphans, setOrphans] = useState([]);
+  const [filter, setFilter] = useState('all');
+  const [sel, setSel] = useState(new Set());
   const load = () => adminFetch('/api/admin/songs').then((j) => setSongs(j.songs)).catch((e) => setLog('曲の一覧を読み込めませんでした: ' + e.message + '\n'));
   useEffect(() => { load(); }, []);
   const say = (s) => setLog((l) => l + s + '\n');
@@ -65,6 +67,32 @@ function Panel() {
   };
   const epList = Object.entries(songs.reduce((m, s) => { if (s.ep) m[s.ep] = (m[s.ep] || 0) + 1; return m; }, {})).sort((a, b) => a[0].localeCompare(b[0]));
 
+  // ---- 一括公開 ----
+  const ITEMS = ['hasVocal', 'hasTrack', 'hasJacket', 'hasLyrics', 'timed', 'hasChords'];
+  const missing = (s) => ITEMS.filter((k) => !s[k]);
+  const FILTERS = {
+    all: ['すべて', () => true],
+    complete: ['全項目登録済み', (s) => missing(s).length === 0],
+    noLyrics: ['歌詞のみ未登録', (s) => s.hasVocal && s.hasTrack && s.hasJacket && s.hasChords && !s.hasLyrics],
+    noJacket: ['ジャケットのみ未登録', (s) => missing(s).length === 1 && !s.hasJacket],
+    multi: ['複数未登録', (s) => missing(s).length >= 2 && !(s.hasVocal && s.hasTrack && s.hasJacket && s.hasChords && !s.hasLyrics)],
+  };
+  const shown = songs.filter(FILTERS[filter][1]);
+  const pickFilter = (f) => { setFilter(f); setSel(f === 'all' ? new Set() : new Set(songs.filter(FILTERS[f][1]).map((s) => s.id))); };
+  const toggle = (id) => setSel((x) => { const n = new Set(x); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allOn = shown.length > 0 && shown.every((s) => sel.has(s.id));
+  const toggleAll = () => setSel((x) => { const n = new Set(x); shown.forEach((s) => (allOn ? n.delete(s.id) : n.add(s.id))); return n; });
+  const publish = async (ready) => {
+    const ids = shown.filter((s) => sel.has(s.id)).map((s) => s.id);
+    if (!ids.length) return;
+    if (!confirm(`チェックした${ids.length}曲を${ready ? '公開' : '非公開に'}します。よろしいですか?`)) return;
+    setBusy(true); setLog('');
+    let n = 0;
+    for (const id of ids) { try { await saveSong({ id, ready }); n++; } catch (e) { say(`× ${songs.find((s) => s.id === id)?.title}: ${e.message}`); } }
+    say(`${n}曲を${ready ? '公開しました(生徒の一覧に出ます)' : '非公開にしました'}`);
+    setBusy(false); load();
+  };
+
   const mark = (b) => <span className={b ? 'ok' : 'ng'}>{b ? '✓' : '－'}</span>;
   return (
     <>
@@ -106,12 +134,22 @@ function Panel() {
       </div>
 
       <h2>登録済みの曲({songs.length})</h2>
+      <div className="card row" style={{ marginBottom: 10 }}>
+        <span>絞り込み:</span>
+        <select value={filter} onChange={(e) => pickFilter(e.target.value)}>
+          {Object.entries(FILTERS).map(([k, [label, fn]]) => <option key={k} value={k}>{label}({songs.filter(fn).length})</option>)}
+        </select>
+        <span style={{ fontSize: 13, color: '#7a6a54' }}>チェック {shown.filter((s) => sel.has(s.id)).length} 曲</span>
+        <button className="btn pri" disabled={busy} onClick={() => publish(true)}>チェックした曲を公開する</button>
+        <button className="btn" disabled={busy} onClick={() => publish(false)}>チェックした曲を非公開にする</button>
+      </div>
       <div className="card" style={{ overflowX: 'auto' }}>
         <table>
-          <thead><tr><th>曲名</th><th>ボーカル</th><th>伴奏</th><th>ジャケット</th><th>歌詞</th><th>タイミング</th><th>コード</th><th>和訳</th><th>公開</th><th></th></tr></thead>
+          <thead><tr><th><input type="checkbox" checked={allOn} onChange={toggleAll} title="表示中の曲をすべて選ぶ/外す" /></th><th>曲名</th><th>ボーカル</th><th>伴奏</th><th>ジャケット</th><th>歌詞</th><th>タイミング</th><th>コード</th><th>和訳</th><th>公開</th><th></th></tr></thead>
           <tbody>
-            {songs.map((s) => (
+            {shown.map((s) => (
               <tr key={s.id}>
+                <td><input type="checkbox" checked={sel.has(s.id)} onChange={() => toggle(s.id)} /></td>
                 <td>{s.title}{s.ep && <div style={{ fontSize: 11, color: '#8a7a64' }}>{s.ep}</div>}</td>
                 <td>{mark(s.hasVocal)}</td><td>{mark(s.hasTrack)}</td><td>{mark(s.hasJacket)}</td><td>{mark(s.hasLyrics)}</td><td>{mark(s.timed)}</td><td>{mark(s.hasChords)}</td><td>{mark(s.hasJp)}</td><td>{mark(s.ready)}</td>
                 <td><Link className="btn" href={'/admin/song/' + s.id}>編集</Link></td>
