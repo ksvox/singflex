@@ -183,3 +183,11 @@ button { cursor: pointer; }
 .adm .sticky { position: sticky; bottom: 0; background: #f3eee6; padding: 10px 0; border-top: 1px solid #e3d8c6; }
 .adm .tap { width: 100%; height: 72px; font-size: 18px; }
 .vid-prev { width: 270px; height: 480px; border-radius: 12px; background: #000; display: block; }
+/* 押した反応 */
+.adm .btn { transition: transform .08s, filter .08s, background .15s; cursor: pointer; }
+.adm .btn:active:not(:disabled) { transform: translateY(1px) scale(.96); filter: brightness(.88); }
+.adm .btn.done { background: #1f7a4d; border-color: #1f7a4d; color: #fff; }
+.adm .btn.play-on { background: #7a3d21; color: #fff; }
+.adm .toast { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 50; max-width: min(92vw, 640px); padding: 12px 18px; border-radius: 10px; background: #2a1d12; color: #fff4e6; font-size: 14px; line-height: 1.6; box-shadow: 0 6px 24px rgba(0,0,0,.25); animation: toastIn .2s ease-out; white-space: pre-line; }
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.adm .seek { width: 100%; accent-color: #7a3d21; margin: 4px 0 8px; }
