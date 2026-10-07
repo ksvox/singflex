@@ -8,7 +8,6 @@ function Panel() {
   const [songs, setSongs] = useState([]);
   const [log, setLog] = useState('');
   const [busy, setBusy] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
   const [orphans, setOrphans] = useState([]);
   const [filter, setFilter] = useState('all');
   const [sel, setSel] = useState(new Set());
@@ -125,12 +124,6 @@ function Panel() {
             </select>
           </div>
         ))}
-      </div>
-
-      <h2>曲を1つ追加</h2>
-      <div className="card row">
-        <input type="text" placeholder="曲名" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
-        <button className="btn pri" disabled={!newTitle.trim()} onClick={async () => { await saveSong({ title: newTitle.trim() }); setNewTitle(''); load(); }}>追加</button>
       </div>
 
       <h2>登録済みの曲({songs.length})</h2>
