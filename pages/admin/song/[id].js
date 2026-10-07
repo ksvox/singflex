@@ -4,7 +4,7 @@ import Link from 'next/link';
 import AdminGate from '../../../components/AdminGate';
 import { adminFetch, adminHeaders } from '../../../lib/client/firebaseClient';
 import { saveSong, uploadTo, resizeJacket, adminAudio } from '../../../lib/client/admin';
-import { cleanLyrics, textToLines, linesToText, vocalEnvelope, placeRepeats, fillSections, nextOnset } from '../../../lib/client/lyrics';
+import { cleanLyrics, textToLines, linesToText, vocalEnvelope, fillSections, syllables } from '../../../lib/client/lyrics';
 import { estimateChords } from '../../../lib/client/chords';
 import { pdfText } from '../../../lib/client/pdf';
 import { fmt } from '../../../lib/client/song';
@@ -62,9 +62,9 @@ function Editor({ id }) {
     }
   };
   // ---- タップ記録 ----
-  // 次に記録する行(楽段モードなら次の楽段の1行目)
+  // 次に記録する行:楽段の頭を叩いたら次の楽段の頭へ/楽段の途中の行(手直し)を叩いたらすぐ下の行へ
   const nextIdx = (i) => {
-    if (!secMode) return Math.min(i + 1, lines.length - 1);
+    if (!secMode || !lines[i]?.start) return Math.min(i + 1, lines.length - 1);
     for (let k = i + 1; k < lines.length; k++) if (lines[k].start) return k;
     return i;
   };
@@ -77,38 +77,52 @@ function Editor({ id }) {
     if (n === i) setMsg(secMode ? '最後の楽段まで記録しました。「楽段の中を自動で割り振り」を押してください。' : '最終行まで記録しました。確認して「タイミングを保存」を押してください。');
     setTapIdx(n);
   };
-  // 記録を再開する位置(ひとつ前の行の1秒前から)
-  const resumeFrom = (i) => { const prev = lines[i - 1]?.t; return prev != null ? prev - 1 : Math.max(0, (lines[i]?.t ?? 0) - 3); };
+  const env = () => { if (!envRef.current) envRef.current = vocalEnvelope(aud.vocal); return envRef.current; };
+  // 記録を始める位置:すぐ上の行の1秒前から(曲の最初には戻らない)
+  // すぐ上の行がまだ空欄なら、記録済みの楽段から「1音節あたりの秒数」を出して、だいたいの位置を見積もる
+  const resumeFrom = (i) => {
+    if (i <= 0) return 0;
+    const prevT = lines[i - 1].t;
+    let st;
+    if (prevT != null) st = prevT - 1;
+    else {
+      let k = i - 1; while (k >= 0 && lines[k].t == null) k--;
+      if (k < 0) return 0;
+      // この曲の歌う速さ(記録済みの楽段の頭どうしの間隔 ÷ その間の音節数)
+      const heads = lines.map((l, x) => ({ l, x })).filter((o) => o.l.t != null);
+      // 間奏などで遅く見積もって行きすぎないよう、いちばん速い楽段の速さを使う
+      const rates = [];
+      for (let h = 0; h + 1 < heads.length; h++) {
+        const a = heads[h]; const b = heads[h + 1];
+        let n = 0; for (let x = a.x; x < b.x; x++) n += syllables(lines[x].text);
+        if (n >= 8 && b.l.t > a.l.t) rates.push((b.l.t - a.l.t) / n);
+      }
+      const rate = rates.length ? Math.min(...rates) : 0.28;
+      let n = 0; for (let x = k; x < i; x++) n += syllables(lines[x].text);
+      st = lines[k].t + n * rate - 3;
+      st = Math.max(lines[k].t, st);
+    }
+    if (lines[i].t != null && lines[i].t - st > 8) st = lines[i].t - 4;
+    return Math.max(0, st);
+  };
   const back = () => {
     let i = Math.max(0, tapIdx - 1);
-    if (secMode) { while (i > 0 && !lines[i].start) i--; }
+    if (secMode && lines[tapIdx]?.start) { while (i > 0 && !lines[i].start) i--; }
     setTapIdx(i);
     if (player.current) startAt(resumeFrom(i));
   };
-  // 次の歌い出しの1.5秒前へ飛ぶ
-  const skip = () => {
-    if (!player.current) return;
-    const nx = nextOnset(env(), player.current.now());
-    if (nx == null) { setMsg('この先に歌い出しは見つかりませんでした。'); return; }
-    startAt(nx - 1.5);
-  };
-  const firstEmpty = (ls) => { const k = ls.findIndex((l) => l.t == null && (!secMode || l.start)); return k < 0 ? ls.length - 1 : k; };
-  const env = () => { if (!envRef.current) envRef.current = vocalEnvelope(aud.vocal); return envRef.current; };
   const autoFill = () => {
     const r = fillSections(lines, env());
     setLines(r.lines);
     setMsg(`楽段の中の${r.filled}行に時間を入れました。${r.skipped.length ? `楽段の頭が未記録のため飛ばした楽段: ${r.skipped.join('、')}。` : ''}「最初から再生(確認)」で流し聴きして、ずれた行だけ直してください。`);
   };
-  const autoRepeat = () => {
-    const r = placeRepeats(lines, env());
-    setLines(r.lines);
-    setTapIdx(firstEmpty(r.lines));
-    setMsg(r.placed
-      ? `繰り返し部分を${r.placed}か所に配置しました。${r.missed ? `(${r.missed}か所は見つからず)` : ''}まだ空欄の行は、スペースキーで続きを記録してください。`
-      : '配置できる繰り返しがありませんでした。同じ歌詞の区間の1回目を、先に最後まで記録してください。');
+  // 最初から記録:入っている時間を全部消してから始める
+  const recordFromStart = () => {
+    if (lines.some((l) => l.t != null) && !confirm('今入っている時間を全部消して、最初から記録しますか?(「タイミングを保存」を押すまでは、画面を開き直せば元に戻せます)')) return;
+    setLines((ls) => ls.map((l) => ({ ...l, t: null })));
+    setTapIdx(0); setMsg('');
+    startAt(0);
   };
-  const shiftAll = (d) => setLines((ls) => ls.map((l) => (l.t == null ? l : { ...l, t: Math.max(0, Math.round((l.t + d) * 10) / 10) })));
-  const clearAll = () => { if (!confirm('この曲の歌詞タイミングを全部消して、最初からやり直しますか?(保存するまでは元に戻せます)')) return; stop(); setLines((ls) => ls.map((l) => ({ ...l, t: null }))); setTapIdx(0); setT(0); };
   const sectionCount = lines.filter((l) => l.start).length;
 
   // キーボード:スペース=歌い出し/←=1行戻る/Esc=停止
@@ -121,7 +135,6 @@ function Editor({ id }) {
       if (e.repeat) return;
       if (!player.current) startAt(resumeFrom(tapIdx)); else tap(Math.max(0, (performance.now() - e.timeStamp) / 1000));
     } else if (e.code === 'ArrowLeft') { e.preventDefault(); back(); }
-    else if (e.code === 'ArrowRight') { e.preventDefault(); skip(); }
     else if (e.code === 'Escape') { stop(); setT((x) => x); }
   };
   useEffect(() => {
@@ -210,32 +223,22 @@ function Editor({ id }) {
         {can && !aud && <button className="btn" onClick={loadAudio}>音源を読み込む</button>}
         {aud && (<>
           <div style={{ fontSize: 13, background: '#fff8ea', border: '1px solid #eadfcd', borderRadius: 8, padding: '8px 12px', marginBottom: 10, lineHeight: 1.7 }}>
-            <b>記録のしかた</b><br />
-            ① 「楽段の頭だけ記録」をオンにして<b>スペースキー</b>で再生。[Verse] や [Chorus] の1行目の歌い出しでスペースを押します(楽段の数だけ叩けば終わり)。<br />
-            ・楽段の頭を叩いたら <b>→キー</b> で次の歌い出しの1.5秒前へ飛べます。次の楽段の手前まで何回か押して、そこで叩いてください。<br />
-            ② 「楽段の中を自動で割り振り」を押すと、楽段の中の行に時間が入ります。<br />
-            ③ 「最初から再生(確認)」で流し聴きして、ずれた行だけ ▶ と ±0.1 で直すか、「ここから記録」でタップし直します。<br />
-            ・叩き損ねたら <b>←キー</b> で戻って少し前から再生し直します。<b>Esc</b> で停止。<br />
-            ・歌詞を直して保存しても、変わっていない行と、言葉を直しただけの行のタイミングは残ります。<br />
-            ・「楽段の頭だけ記録」をオフにすると、全部の行を1行ずつ記録できます。
+            <b>記録のしかた(3ステップ)</b><br />
+            ① <b>楽段の頭を記録</b>:「最初から記録」を押し、[Verse] や [Chorus] の1行目の歌い出しで<b>スペースキー</b>。楽段の数だけ叩けば終わりです。途中で止めたら、次に叩く楽段の「ここから記録」→ スペースキーで、すぐ上の行の少し前から再生が始まります。<br />
+            ② <b>楽段の中を自動で割り振り</b>:ボタンを押すと、楽段の中の行に時間が入ります。<br />
+            ③ <b>ずれた行を直す</b>:「最初から再生(確認)」で流し聴きし、ずれた行は ±0.1 で直すか、その行の「ここから記録」→ スペースキー(再生開始)→ 歌い出しでスペースキー → Esc で止める。<br />
+            ・叩き損ねたら <b>←キー</b> で1つ戻って少し前から再生し直します。最後に「タイミングを保存」を忘れずに。
           </div>
           {chordMsg && <div className="msg" style={{ marginBottom: 8 }}>{chordMsg}</div>}
           <div className="row" style={{ marginBottom: 8 }}>
             <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={secMode} onChange={(e) => { setSecMode(e.target.checked); if (e.target.checked) { let k = tapIdx; while (k > 0 && !lines[k].start) k--; setTapIdx(k); } }} />楽段の頭だけ記録({sectionCount}か所)</label>
           </div>
           <div className="row">
-            <button className="btn" onClick={() => { setTapIdx(0); startAt(0); }}>最初から記録</button>
-            <button className="btn" onClick={() => startAt(0)}>最初から再生(確認)</button>
+            <button className="btn" onClick={recordFromStart}>① 最初から記録</button>
+            <button className="btn pri" onClick={autoFill}>② 楽段の中を自動で割り振り</button>
+            <button className="btn" onClick={() => startAt(0)}>③ 最初から再生(確認)</button>
             <button className="btn" onClick={stop}>停止</button>
             <span className="mono">{fmt(t)}</span>
-          </div>
-          <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn pri" onClick={autoFill}>楽段の中を自動で割り振り</button>
-            <button className="btn" onClick={autoRepeat}>繰り返し部分を自動で配置</button>
-            <button className="btn" onClick={() => shiftAll(-0.1)}>全行 −0.1秒</button>
-            <button className="btn" onClick={() => shiftAll(0.1)}>全行 +0.1秒</button>
-            <button className="btn" onClick={() => setTapIdx(firstEmpty(lines))}>記録位置を最初の空欄へ</button>
-            <button className="btn" onClick={clearAll}>時間を全部消す</button>
           </div>
           <div style={{ marginTop: 10 }}>
             {lines.map((l, i) => (
@@ -254,11 +257,12 @@ function Editor({ id }) {
           <div className="sticky">
             <div style={{ textAlign: 'center', marginBottom: 8 }}>
               <div style={{ fontSize: 13, color: '#a8957a', minHeight: 18 }}>{lines[tapIdx - 1]?.text || ''}</div>
+              <div style={{ fontSize: 12, color: '#7a3d21', letterSpacing: 2 }}>次に叩く行{lines[tapIdx]?.start && lines[tapIdx]?.sec ? `:[${lines[tapIdx].sec}] の1行目` : ''}</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: '#3a2a18', lineHeight: 1.4 }}>
                 {lines[tapIdx]?.start && lines[tapIdx]?.sec ? <span style={{ fontSize: 14, color: '#7a3d21' }}>[{lines[tapIdx].sec}] </span> : null}{lines[tapIdx]?.text || ''}
               </div>
               <div style={{ fontSize: 15, color: '#7a6a54', minHeight: 20 }}>{lines[tapIdx + 1]?.text || '(最後の行)'}</div>
-              <div style={{ fontSize: 12, color: '#7a6a54', marginTop: 4 }}>{tapIdx + 1} / {lines.length} 行目{secMode ? '(楽段の頭だけ)' : ''} ・ スペース=歌い出し → =次の歌い出しへ ← =戻る Esc=停止</div>
+              <div style={{ fontSize: 12, color: '#7a6a54', marginTop: 4 }}>{tapIdx + 1} / {lines.length} 行目 ・ スペース=歌い出し ← =1つ戻る Esc=停止</div>
             </div>
             <button className="btn pri tap" onClick={() => { if (!player.current) startAt(resumeFrom(tapIdx)); else tap(0); }}>{player.current ? 'この行の歌い出し!' : 'ここから再生して記録'}</button>
             <div className="row" style={{ marginTop: 8 }}><button className="btn pri" onClick={() => save({ lines, timed: lines.every((l) => l.t != null) }, 'タイミングを保存しました')}>タイミングを保存</button></div>
