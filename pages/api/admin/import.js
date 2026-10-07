@@ -6,7 +6,7 @@ const display = (t) => String(t || '').replace(/-\s*\([^()]+\)\s*$/, '').trim();
 
 // 門弟アプリの楽曲(songs)から、曲名とEP名をSingFlexに取り込む(IDは同じものを使う)
 async function handler(req, res) {
-  if (!(await isAdmin(req))) return res.status(401).json({ error: 'admin' });
+  if (!(await isAdmin(req))) return res.status(401).json({ error: req._adminWhy || 'admin' });
   const [src, mine] = await Promise.all([db().collection('songs').get(), db().collection(SONGS).get()]);
   const have = new Set(mine.docs.map((d) => d.id));
   let added = 0; const batch = db().batch();

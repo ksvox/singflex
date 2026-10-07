@@ -3,7 +3,7 @@ import { db, SONGS } from '../../../lib/firebaseAdmin';
 import { isAdmin } from '../../../lib/pass';
 
 async function handler(req, res) {
-  if (!(await isAdmin(req))) return res.status(401).json({ error: 'admin' });
+  if (!(await isAdmin(req))) return res.status(401).json({ error: req._adminWhy || 'admin' });
   const snap = await db().collection(SONGS).get();
   const songs = snap.docs.map((d) => {
     const s = d.data();
