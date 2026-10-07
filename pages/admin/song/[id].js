@@ -4,7 +4,7 @@ import Link from 'next/link';
 import AdminGate from '../../../components/AdminGate';
 import { adminFetch, adminHeaders } from '../../../lib/client/firebaseClient';
 import { saveSong, uploadTo, resizeJacket, adminAudio } from '../../../lib/client/admin';
-import { cleanLyrics, textToLines, linesToText, autoTiming } from '../../../lib/client/lyrics';
+import { cleanLyrics, textToLines, linesToText, vocalEnvelope, placeRepeats } from '../../../lib/client/lyrics';
 import { estimateChords } from '../../../lib/client/chords';
 import { pdfText } from '../../../lib/client/pdf';
 import { fmt } from '../../../lib/client/song';
@@ -20,6 +20,9 @@ function Editor({ id }) {
   const [t, setT] = useState(0);
   const [tapIdx, setTapIdx] = useState(0);
   const player = useRef(null);
+  const envRef = useRef(null);
+  const keyRef = useRef(null);
+  const rowRefs = useRef([]);
 
   const load = async () => {
     const d = await adminFetch('/api/admin/song?id=' + id);
@@ -45,12 +48,57 @@ function Editor({ id }) {
     const [vocal, track] = await Promise.all([adminAudio(s.vocalKey), adminAudio(s.trackKey)]);
     setAud({ vocal, track }); setMsg('音源を読み込みました');
   };
+  // ---- タップ記録 ----
   const tap = () => {
-    if (!player.current) return;
+    if (!player.current || !lines.length) return;
     const now = Math.round(player.current.now() * 10) / 10;
-    setLines((ls) => ls.map((l, i) => (i === tapIdx ? { ...l, t: now } : l)));
-    setTapIdx((i) => Math.min(i + 1, lines.length - 1));
+    const i = tapIdx;
+    setLines((ls) => ls.map((l, k) => (k === i ? { ...l, t: now } : l)));
+    if (i >= lines.length - 1) setMsg('最終行まで記録しました。確認して「タイミングを保存」を押してください。');
+    setTapIdx(Math.min(i + 1, lines.length - 1));
   };
+  // 記録を再開する位置(ひとつ前の行の1秒前から)
+  const resumeFrom = (i) => { const prev = lines[i - 1]?.t; return prev != null ? prev - 1 : Math.max(0, (lines[i]?.t ?? 0) - 3); };
+  const back = () => {
+    const i = Math.max(0, tapIdx - 1);
+    setTapIdx(i);
+    if (player.current) startAt(resumeFrom(i));
+  };
+  const firstEmpty = (ls) => { const k = ls.findIndex((l) => l.t == null); return k < 0 ? ls.length - 1 : k; };
+  const autoRepeat = () => {
+    if (!envRef.current) envRef.current = vocalEnvelope(aud.vocal);
+    const r = placeRepeats(lines, envRef.current);
+    setLines(r.lines);
+    setTapIdx(firstEmpty(r.lines));
+    setMsg(r.placed
+      ? `繰り返し部分を${r.placed}か所に配置しました。${r.missed ? `(${r.missed}か所は見つからず)` : ''}まだ空欄の行は、スペースキーで続きを記録してください。`
+      : '配置できる繰り返しがありませんでした。同じ歌詞の区間の1回目を、先に最後まで記録してください。');
+  };
+  const shiftAll = (d) => setLines((ls) => ls.map((l) => (l.t == null ? l : { ...l, t: Math.max(0, Math.round((l.t + d) * 10) / 10) })));
+  const clearAll = () => { if (!confirm('この曲の歌詞タイミングを全部消して、最初からやり直しますか?(保存するまでは元に戻せます)')) return; stop(); setLines((ls) => ls.map((l) => ({ ...l, t: null }))); setTapIdx(0); setT(0); };
+
+  // キーボード:スペース=歌い出し/←=1行戻る/Esc=停止
+  keyRef.current = (e) => {
+    const tg = e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA') return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      if (e.repeat) return;
+      if (!player.current) startAt(resumeFrom(tapIdx)); else tap();
+    } else if (e.code === 'ArrowLeft') { e.preventDefault(); back(); }
+    else if (e.code === 'Escape') { stop(); setT((x) => x); }
+  };
+  useEffect(() => {
+    if (!aud) return;
+    const down = (e) => keyRef.current && keyRef.current(e);
+    const up = (e) => { if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) e.preventDefault(); };
+    window.addEventListener('keydown', down); window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
+  }, [aud]);
+  // 記録中の行が見える位置までスクロール
+  useEffect(() => { const el = rowRefs.current[tapIdx]; if (el && player.current) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [tapIdx]);
+
   const nudge = (i, d) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, t: Math.max(0, Math.round(((l.t || 0) + d) * 10) / 10) } : l)));
   const setTime = (i, v) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, t: v === '' ? null : Number(v) } : l)));
 
@@ -126,27 +174,50 @@ function Editor({ id }) {
         {!can && <p>先にボーカルと伴奏を登録してください。</p>}
         {can && !aud && <button className="btn" onClick={loadAudio}>音源を読み込む</button>}
         {aud && (<>
+          <div style={{ fontSize: 13, background: '#fff8ea', border: '1px solid #eadfcd', borderRadius: 8, padding: '8px 12px', marginBottom: 10, lineHeight: 1.7 }}>
+            <b>記録のしかた</b><br />
+            ① <b>スペースキー</b>で再生が始まります。歌い出しに合わせてもう一度スペースを押すと、その行の時間が入り、次の行へ進みます。<br />
+            ② 叩き損ねたら <b>←キー</b> で1行戻り、少し前から再生し直します。<b>Esc</b> で停止。<br />
+            ③ 1回目のコーラスなどを記録し終えたら「繰り返し部分を自動で配置」。同じ歌詞の2回目以降に自動で時間が入ります。<br />
+            ④ 残った空欄の行は、スペースキーで続きから記録できます(ひとつ前の行の1秒前から再生します)。
+          </div>
           <div className="row">
-            <button className="btn" onClick={() => { const ts = autoTiming(aud.vocal, lines.length); setLines((ls) => ls.map((l, i) => ({ ...l, t: ts[i] }))); setMsg('自動で推定しました。再生して確認・微調整してください。'); }}>自動で推定</button>
-            <button className="btn" onClick={() => startAt(0)}>最初から再生</button>
+            <button className="btn" onClick={() => { setTapIdx(0); startAt(0); }}>最初から記録</button>
+            <button className="btn" onClick={() => startAt(0)}>最初から再生(確認)</button>
             <button className="btn" onClick={stop}>停止</button>
             <span className="mono">{fmt(t)}</span>
           </div>
-          <p style={{ fontSize: 12, color: '#7a6a54' }}>タップ記録: 再生しながら、各行の歌い出しで下の大きなボタンを押すと、順番に時間が入ります(今は{tapIdx + 1}行目)。</p>
-          {lines.map((l, i) => (
-            <div key={i} className={'tl' + (player.current && l.t != null && l.t <= t && (lines[i + 1]?.t ?? 1e9) > t ? ' now' : '')}>
-              <input type="number" step="0.1" value={l.t ?? ''} onChange={(e) => setTime(i, e.target.value)} />
-              <span>{l.start && l.sec ? <b style={{ color: '#7a3d21' }}>[{l.sec}] </b> : null}{l.text}</span>
-              <span className="row" style={{ gap: 4 }}>
-                <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => nudge(i, -0.1)}>-0.1</button>
-                <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => nudge(i, 0.1)}>+0.1</button>
-                <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => startAt((l.t || 0) - 1.5)}>▶</button>
-                <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => setTapIdx(i)}>ここから記録</button>
-              </span>
-            </div>
-          ))}
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn pri" onClick={autoRepeat}>繰り返し部分を自動で配置</button>
+            <button className="btn" onClick={() => shiftAll(-0.1)}>全行 −0.1秒</button>
+            <button className="btn" onClick={() => shiftAll(0.1)}>全行 +0.1秒</button>
+            <button className="btn" onClick={() => setTapIdx(firstEmpty(lines))}>記録位置を最初の空欄へ</button>
+            <button className="btn" onClick={clearAll}>時間を全部消す</button>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {lines.map((l, i) => (
+              <div key={i} ref={(el) => { rowRefs.current[i] = el; }} className={'tl' + (player.current && l.t != null && l.t <= t && (lines[i + 1]?.t ?? 1e9) > t ? ' now' : '')} style={i === tapIdx ? { boxShadow: 'inset 4px 0 0 #7a3d21' } : null}>
+                <input type="number" step="0.1" value={l.t ?? ''} onChange={(e) => setTime(i, e.target.value)} />
+                <span>{l.start && l.sec ? <b style={{ color: '#7a3d21' }}>[{l.sec}] </b> : null}{l.text}</span>
+                <span className="row" style={{ gap: 4 }}>
+                  <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => nudge(i, -0.1)}>-0.1</button>
+                  <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => nudge(i, 0.1)}>+0.1</button>
+                  <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => startAt((l.t || 0) - 1.5)}>▶</button>
+                  <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => setTapIdx(i)}>ここから記録</button>
+                </span>
+              </div>
+            ))}
+          </div>
           <div className="sticky">
-            <button className="btn pri tap" onClick={tap}>この行の歌い出し!({tapIdx + 1}行目)</button>
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: 13, color: '#a8957a', minHeight: 18 }}>{lines[tapIdx - 1]?.text || ''}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#3a2a18', lineHeight: 1.4 }}>
+                {lines[tapIdx]?.start && lines[tapIdx]?.sec ? <span style={{ fontSize: 14, color: '#7a3d21' }}>[{lines[tapIdx].sec}] </span> : null}{lines[tapIdx]?.text || ''}
+              </div>
+              <div style={{ fontSize: 15, color: '#7a6a54', minHeight: 20 }}>{lines[tapIdx + 1]?.text || '(最後の行)'}</div>
+              <div style={{ fontSize: 12, color: '#7a6a54', marginTop: 4 }}>{tapIdx + 1} / {lines.length} 行目 ・ スペース=歌い出し ← =1行戻る Esc=停止</div>
+            </div>
+            <button className="btn pri tap" onClick={() => { if (!player.current) startAt(resumeFrom(tapIdx)); else tap(); }}>{player.current ? 'この行の歌い出し!' : 'ここから再生して記録'}</button>
             <div className="row" style={{ marginTop: 8 }}><button className="btn pri" onClick={() => save({ lines, timed: lines.every((l) => l.t != null) }, 'タイミングを保存しました')}>タイミングを保存</button></div>
           </div>
         </>)}
