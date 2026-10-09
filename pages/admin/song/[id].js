@@ -269,7 +269,7 @@ function Editor({ id }) {
     setCnt((c) => ({ ...c, on: c.on || (v0 != null && v0 < 2.5), bpm: r.bpm, offset: c.offset === '' && v0 != null ? v0 : c.offset }));
     setMsg(`テンポは ${r.bpm} と判定しました。「歌い出しは何拍目?」を選んで、「カウント付きで確認」で聞いてください。`);
   };
-  // カウント → 曲。歌い出しの後も16拍だけ小さくスティックを重ねて、拍が合っているか確かめられる
+  // カウント → 曲(生徒画面と同じ鳴り方)
   const playCount = () => {
     stop();
     const bpm = Number(cnt.bpm); const off = Number(cnt.offset) || 0;
@@ -281,9 +281,6 @@ function Editor({ id }) {
     const hi = mk(true), lo = mk(false);
     const hit = (at, acc, vol) => { const n = ctx.createBufferSource(); n.buffer = acc ? hi : lo; const g = ctx.createGain(); g.gain.value = vol; n.connect(g); g.connect(ctx.destination); n.start(at); };
     for (let k = 0; k < p.n; k++) hit(T0 + p.first + k * p.beat, k === 0, 1);
-    // 歌い出しの後の確認用(小節の頭=強く)
-    const bNo = Math.min(4, Math.max(1, Number(cnt.beat) || 1));
-    for (let k = 0; k < 16; k++) hit(T0 + off + k * p.beat, (bNo - 1 + k) % 4 === 0, 0.4);
     const srcs = [aud.vocal, aud.track].map((b) => { const n = ctx.createBufferSource(); n.buffer = b; n.connect(ctx.destination); n.start(T0, 0); return n; });
     const timer = setInterval(() => setT(Math.max(0, ctx.currentTime - T0)), 50);
     player.current = { ctx, srcs, timer, now: () => ctx.currentTime - T0 };
