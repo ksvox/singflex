@@ -98,7 +98,7 @@ export default function Booth() {
   const onImg = (e) => setCol(jacketColors(e.currentTarget));
 
   return (
-    <Stage bg={col.dark}>
+    <Stage bg={col.dark} copy={!open}>
       <div className="booth" style={{ position: 'absolute', inset: 0, '--dark': col.dark }}>
         <div className="abs orb" style={{ left: -120, top: -80, width: 520, height: 520, background: `radial-gradient(closest-side, ${col.a}, transparent)`, opacity: 0.55 }} />
         <div className="abs orb" style={{ left: 120, top: 380, width: 420, height: 420, background: `radial-gradient(closest-side, ${col.b}, transparent)`, opacity: 0.45 }} />
@@ -196,9 +196,10 @@ export default function Booth() {
             </div>
           </div>
           <div className="bt-row">
-            <label className="bt"><span>Bluetooth使用中<br /><small style={{ color: '#c9a9e6' }}>歌詞を音に合わせる</small></span><input type="checkbox" checked={bt} onChange={(e) => setBt(e.target.checked)} /></label>
-            <label className="bt"><span>高音やわらげ<br /><small style={{ color: '#c9a9e6' }}>伴奏のキンキンを抑える</small></span><input type="checkbox" checked={soft} onChange={(e) => { const v = e.target.checked; setSoft(v); E && E.setSoft(v); try { localStorage.setItem('sf_soft', v ? '1' : '0'); } catch {} }} /></label>
+            <label className="bt"><span>Bluetooth使用中</span><input type="checkbox" checked={bt} onChange={(e) => setBt(e.target.checked)} /></label>
+            <label className="bt"><span>高音やわらげ</span><input type="checkbox" checked={soft} onChange={(e) => { const v = e.target.checked; setSoft(v); E && E.setSoft(v); try { localStorage.setItem('sf_soft', v ? '1' : '0'); } catch {} }} /></label>
           </div>
+          <div className="copy-in">© ボーカル道場K's VOX</div>
         </div>
 
         {status && (

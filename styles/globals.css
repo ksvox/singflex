@@ -238,6 +238,9 @@ button { cursor: pointer; }
 .adm .jp-tbl input { padding: 6px; font-size: 13px; }
 
 /* ミキサー下のスイッチ(Bluetooth・高音やわらげ)を横に2つ並べる */
-.bt-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 14px 0; }
-.bt-row .bt { margin: 0; padding: 8px 10px; font-size: 12px; gap: 6px; }
-.bt-row .bt small { font-size: 10px; }
+.mcol { gap: 4px; }
+.vwrap { height: 96px; }
+.vwrap input { width: 96px; left: -34px; top: 34px; }
+.bt-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 14px 0; }
+.bt-row .bt { margin: 0; padding: 6px 10px; min-height: 40px; font-size: 12px; gap: 6px; }
+.copy-in { text-align: center; font-size: 9px; letter-spacing: .5px; color: rgba(255,255,255,.42); margin-top: 6px; }
