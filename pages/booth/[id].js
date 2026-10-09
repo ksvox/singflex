@@ -29,7 +29,6 @@ export default function Booth() {
   const [tempo, setTempo] = useState(100);
   const [open, setOpen] = useState(true);
   const [bt, setBt] = useState(false);
-  const [soft, setSoft] = useState(true);
   const [ab, setAb] = useState({ a: null, b: null });
   const dragY = useRef(null); const dragged = useRef(false);
 
@@ -50,8 +49,6 @@ export default function Booth() {
         const e = new KaraokeEngine();
         await e.load(files.vocal, files.track);
         e.setVocal(0); e.setTrack(100);
-        let sf = true; try { sf = localStorage.getItem('sf_soft') !== '0'; } catch {}
-        e.setSoft(sf); setSoft(sf);
         e.onEnd = () => setPlaying(false);
         eng.current = e;
         if (alive) setStatus(null);
@@ -80,7 +77,13 @@ export default function Booth() {
   const dur = E ? E.duration : 0;
 
   const seek = (s) => { if (!E) return; E.seek(s); setT(s); };
-  const toggle = async () => { if (!E) return; if (playing) { E.pause(); setPlaying(false); } else { await E.play(); setPlaying(true); } };
+  const toggle = async () => { if (!E) return; if (playing) { E.pause(); setPlaying(false); } else {
+      // いきなり歌い出す曲は、曲の頭から再生する時だけ4つカウントを入れる
+      const c = meta && meta.count;
+      const useCount = c && c.on && Number(c.bpm) > 0 && E.time < 0.3;
+      await E.play(useCount ? { count: { bpm: Number(c.bpm), offset: Number(c.offset) || 0 } } : undefined);
+      setPlaying(true);
+    } };
   const cycleAB = () => {
     if (ab.a == null) setAb({ a: t, b: null });
     else if (ab.b == null && t > ab.a + 1) { setAb({ a: ab.a, b: t }); E && E.setLoop(ab.a, t); }
@@ -195,10 +198,7 @@ export default function Booth() {
               <button className="tb" onClick={() => chTempo(-5)} aria-label="テンポを下げる">－</button>
             </div>
           </div>
-          <div className="bt-row">
-            <label className="bt"><span>Bluetooth使用中</span><input type="checkbox" checked={bt} onChange={(e) => setBt(e.target.checked)} /></label>
-            <label className="bt"><span>高音やわらげ</span><input type="checkbox" checked={soft} onChange={(e) => { const v = e.target.checked; setSoft(v); E && E.setSoft(v); try { localStorage.setItem('sf_soft', v ? '1' : '0'); } catch {} }} /></label>
-          </div>
+          <label className="bt"><span>Bluetoothスピーカー使用中<br /><small style={{ color: '#c9a9e6' }}>歌詞の進みを音に合わせます</small></span><input type="checkbox" checked={bt} onChange={(e) => setBt(e.target.checked)} /></label>
           <div className="copy-in">© ボーカル道場K's VOX</div>
         </div>
 

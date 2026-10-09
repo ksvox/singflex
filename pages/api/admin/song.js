@@ -2,7 +2,7 @@ import { handle } from '../../../lib/handle';
 import { db, SONGS, getAdmin } from '../../../lib/firebaseAdmin';
 import { isAdmin } from '../../../lib/pass';
 
-const ALLOWED = ['title', 'ep', 'ready', 'vocalKey', 'trackKey', 'jacketKey', 'lines', 'chords', 'jp', 'timed', 'rawLyrics', 'memo', 'memoSrc', 'memoAt', 'videoJp', 'videoComment', 'videoMadeAt'];
+const ALLOWED = ['title', 'ep', 'ready', 'vocalKey', 'trackKey', 'jacketKey', 'lines', 'chords', 'jp', 'timed', 'rawLyrics', 'memo', 'memoSrc', 'memoAt', 'videoJp', 'videoComment', 'videoMadeAt', 'count'];
 const MEDIA = ['vocalKey', 'trackKey', 'jacketKey'];
 
 // 作成(idなし)・更新(idあり)・削除(DELETE)

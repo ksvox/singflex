@@ -15,6 +15,7 @@ async function handler(req, res) {
   res.json({
     id: doc.id, title: s.title, ep: s.ep || '', version: s.version || 1,
     lines: s.lines || [], chords: s.chords || [], jp: s.jp || '',
+    count: s.count && s.count.on ? s.count : null,
     memo: s.memo && s.memoSrc === (s.lines || []).map((l) => l.text).join('\n') ? s.memo : null,
     vocal: await url(s.vocalKey), track: await url(s.trackKey), jacket: await url(s.jacketKey)
   });
