@@ -8,7 +8,7 @@ import { cleanLyrics, textToLines, linesToText, vocalEnvelope, fillSections, syl
 import { estimateChords } from '../../../lib/client/chords';
 import { pdfText } from '../../../lib/client/pdf';
 import { fmt } from '../../../lib/client/song';
-import { detectTempo } from '../../../lib/client/tempo';
+import { detectTempo, countPlan, stickSamples } from '../../../lib/client/tempo';
 import { analyzeLines, memoSource, memoSections, groupAt } from '../../../lib/client/english';
 import MemoLine, { MemoLegend } from '../../../components/MemoLine';
 
@@ -115,7 +115,7 @@ function Editor({ id }) {
   const [seekV, setSeekV] = useState(null);
   const [busyKey, setBusyKey] = useState(null);
   const [doneKey, setDoneKey] = useState(null);
-  const [cnt, setCnt] = useState({ on: false, bpm: '', offset: '' });
+  const [cnt, setCnt] = useState({ on: false, bpm: '', offset: '', beat: 1 });
   const player = useRef(null);
   const envRef = useRef(null);
   const keyRef = useRef(null);
@@ -125,7 +125,8 @@ function Editor({ id }) {
     const d = await adminFetch('/api/admin/song?id=' + id);
     setS(d); setLines(d.lines || []); setText(linesToText(d.lines || [])); setJp(d.jp || '');
     setChordTxt((d.chords || []).map((c) => `${c.t} ${c.c}`).join('\n'));
-    setCnt(d.count ? { on: !!d.count.on, bpm: d.count.bpm ?? '', offset: d.count.offset ?? '' } : { on: false, bpm: '', offset: '' });
+    const v0 = (d.lines || []).find((l) => l.t != null);
+    setCnt(d.count ? { on: !!d.count.on, bpm: d.count.bpm ?? '', offset: d.count.offset ?? (v0 ? v0.t : ''), beat: d.count.beat || 1 } : { on: false, bpm: '', offset: v0 ? v0.t : '', beat: 1 });
   };
   useEffect(() => { load(); return () => stop(); }, [id]);
 
@@ -260,26 +261,32 @@ function Editor({ id }) {
   useEffect(() => { const el = rowRefs.current[tapIdx]; if (el && player.current) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [tapIdx]);
 
   // ---- カウント(歌い出しのドンカマ)----
+  // 歌い出しの時刻は「歌詞のタイミング」の1行目。テンポだけ自動で調べ、何拍目から歌うかを先生が選ぶ
+  const firstLineT = () => { const f = (lines.length ? lines : s.lines || []).find((l) => l.t != null); return f ? f.t : null; };
   const detectCount = () => {
-    const first = (s.lines || []).find((l) => l.t != null);
-    const r = detectTempo(aud.track, first ? first.t : null);
-    setCnt((c) => ({ on: c.on || (first ? first.t < 2.5 : false), bpm: r.bpm, offset: r.offset }));
-    setMsg(`テンポ ${r.bpm}、歌い出しの拍 ${r.offset}秒 と判定しました。「カウント付きで確認」で合っているか聞いてください。`);
+    const v0 = firstLineT();
+    const r = detectTempo(aud.track, v0);
+    setCnt((c) => ({ ...c, on: c.on || (v0 != null && v0 < 2.5), bpm: r.bpm, offset: c.offset === '' && v0 != null ? v0 : c.offset }));
+    setMsg(`テンポは ${r.bpm} と判定しました。「歌い出しは何拍目?」を選んで、「カウント付きで確認」で聞いてください。`);
   };
-  // カウント4つ → 曲。歌い出しの後も16拍だけ小さくクリックを重ねて、拍が合っているか確かめられる
+  // カウント → 曲。歌い出しの後も16拍だけ小さくスティックを重ねて、拍が合っているか確かめられる
   const playCount = () => {
     stop();
     const bpm = Number(cnt.bpm); const off = Number(cnt.offset) || 0;
-    if (!(bpm > 0)) { setMsg('先にテンポを入れてください'); return; }
+    if (!(bpm > 0)) { setMsg('先にテンポを入れてください(「テンポを自動で調べる」)'); return; }
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const beat = 60 / bpm; const s0 = Math.max(0, off - 4 * beat); const pre = 4 * beat - (off - s0);
-    const T0 = ctx.currentTime + 0.15; const Tm = T0 + pre;
-    const click = (at, f, v) => { const o = ctx.createOscillator(); const g = ctx.createGain(); o.frequency.value = f; g.gain.setValueAtTime(v, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.05); o.connect(g); g.connect(ctx.destination); o.start(at); o.stop(at + 0.06); };
-    for (let k = 0; k < 4; k++) click(T0 + k * beat, k === 0 ? 1600 : 1100, 0.6);
-    for (let k = 0; k < 16; k++) click(Tm + (off - s0) + k * beat, k % 4 === 0 ? 1600 : 1100, 0.25);
-    const srcs = [aud.vocal, aud.track].map((b) => { const n = ctx.createBufferSource(); n.buffer = b; n.connect(ctx.destination); n.start(Tm, s0); return n; });
-    const timer = setInterval(() => setT(Math.max(0, ctx.currentTime - Tm + s0)), 50);
-    player.current = { ctx, srcs, timer, now: () => ctx.currentTime - Tm + s0 };
+    const p = countPlan(bpm, off, cnt.beat);
+    const T0 = ctx.currentTime + 0.15 + Math.max(0, -p.first); // 曲の頭の時刻
+    const mk = (acc) => { const d = stickSamples(ctx.sampleRate, acc); const b = ctx.createBuffer(1, d.length, ctx.sampleRate); b.getChannelData(0).set(d); return b; };
+    const hi = mk(true), lo = mk(false);
+    const hit = (at, acc, vol) => { const n = ctx.createBufferSource(); n.buffer = acc ? hi : lo; const g = ctx.createGain(); g.gain.value = vol; n.connect(g); g.connect(ctx.destination); n.start(at); };
+    for (let k = 0; k < p.n; k++) hit(T0 + p.first + k * p.beat, k === 0, 1);
+    // 歌い出しの後の確認用(小節の頭=強く)
+    const bNo = Math.min(4, Math.max(1, Number(cnt.beat) || 1));
+    for (let k = 0; k < 16; k++) hit(T0 + off + k * p.beat, (bNo - 1 + k) % 4 === 0, 0.4);
+    const srcs = [aud.vocal, aud.track].map((b) => { const n = ctx.createBufferSource(); n.buffer = b; n.connect(ctx.destination); n.start(T0, 0); return n; });
+    const timer = setInterval(() => setT(Math.max(0, ctx.currentTime - T0)), 50);
+    player.current = { ctx, srcs, timer, now: () => ctx.currentTime - T0 };
     setPlayRow(-2);
   };
   const adjCount = (k, d) => setCnt((c) => ({ ...c, [k]: Math.max(0, Math.round(((Number(c[k]) || 0) + d) * 100) / 100) }));
@@ -423,33 +430,44 @@ function Editor({ id }) {
         </>)}
       </div>
 
-      <h2>カウント(いきなり歌い出す曲の歌い出しにドンカマ4つ)</h2>
+      <h2>カウント(いきなり歌い出す曲のドンカマ)</h2>
       <div className="card">
-        <p style={{ fontSize: 13, color: '#7a6a54', margin: '0 0 8px' }}>オンにした曲は、生徒が曲の頭から再生した時だけ、その曲のテンポで4つカウントが鳴ってから始まります(TEMPOを変えるとカウントの速さも合わせます)。テンポは自動で調べられますが、倍・半分に間違えることがあるので、必ず「カウント付きで確認」で聞いてください。歌い出しの後も16拍だけ小さくクリックが鳴るので、拍とずれていないか確かめられます。</p>
-        {!aud && <p>上の「歌詞のタイミング」で「音源を読み込む」を押すと、自動判定と確認ができます。</p>}
-        <div className="row">
-          {aud && <button className="btn pri" onClick={detectCount}>テンポを自動で調べる</button>}
-          {aud && <button className={'btn' + (player.current && playRow === -2 ? ' play-on' : '')} onClick={() => { if (player.current && playRow === -2) { stop(); return; } playCount(); }}>{player.current && playRow === -2 ? '■ 止める' : '▶ カウント付きで確認'}</button>}
-          <label className="row" style={{ marginLeft: 'auto' }}><input type="checkbox" checked={!!cnt.on} onChange={(e) => setCnt((c) => ({ ...c, on: e.target.checked }))} />この曲の歌い出しにカウントを入れる</label>
-        </div>
-        <div className="row" style={{ marginTop: 10 }}>
-          <span style={{ width: 100 }}>テンポ(BPM)</span>
-          <input type="number" step="0.1" value={cnt.bpm} onChange={(e) => setCnt((c) => ({ ...c, bpm: e.target.value }))} style={{ width: 110 }} />
-          <button className="btn" onClick={() => adjCount('bpm', -0.5)}>-0.5</button>
-          <button className="btn" onClick={() => adjCount('bpm', 0.5)}>+0.5</button>
+        <p style={{ fontSize: 13, color: '#7a6a54', margin: '0 0 8px' }}>オンにした曲は、生徒が曲の頭から再生した時だけ、歌い出しの前にスティックのカウントが鳴ります。1拍目から歌う曲は「1・2・3・4」の4つ、4拍目から歌う曲は「1・2・3」の3つです。歌い出しの時刻は「歌詞のタイミング」の1行目を使います。</p>
+        {!aud && <p>上の「歌詞のタイミング」で「音源を読み込む」を押すと、テンポの自動判定と確認ができます。</p>}
+        <div className="row" style={{ marginTop: 6 }}>
+          <b style={{ width: 130 }}>① テンポ(BPM)</b>
+          {aud && <button className="btn pri" onClick={detectCount}>自動で調べる</button>}
+          <input type="number" step="0.1" value={cnt.bpm} onChange={(e) => setCnt((c) => ({ ...c, bpm: e.target.value }))} style={{ width: 100 }} />
           <button className="btn" onClick={() => setCnt((c) => ({ ...c, bpm: Math.round(Number(c.bpm) * 2 * 10) / 10 }))}>×2</button>
           <button className="btn" onClick={() => setCnt((c) => ({ ...c, bpm: Math.round((Number(c.bpm) / 2) * 10) / 10 }))}>÷2</button>
         </div>
-        <div className="row" style={{ marginTop: 8 }}>
-          <span style={{ width: 100 }}>歌い出しの拍(秒)</span>
-          <input type="number" step="0.01" value={cnt.offset} onChange={(e) => setCnt((c) => ({ ...c, offset: e.target.value }))} style={{ width: 110 }} />
-          <button className="btn" onClick={() => adjCount('offset', -0.02)}>-0.02</button>
-          <button className="btn" onClick={() => adjCount('offset', 0.02)}>+0.02</button>
-          <button className="btn" onClick={() => cnt.bpm && adjCount('offset', -60 / Number(cnt.bpm))}>1拍前</button>
-          <button className="btn" onClick={() => cnt.bpm && adjCount('offset', 60 / Number(cnt.bpm))}>1拍後</button>
+        <div className="row" style={{ marginTop: 10 }}>
+          <b style={{ width: 130 }}>② 歌い出しは何拍目?</b>
+          {[1, 2, 3, 4].map((b) => (
+            <button key={b} className={'btn' + (Number(cnt.beat) === b ? ' pri' : '')} onClick={() => setCnt((c) => ({ ...c, beat: b }))}>{b}拍目{b === 1 ? '(4つ鳴る)' : `(${b - 1}つ鳴る)`}</button>
+          ))}
         </div>
         <div className="row" style={{ marginTop: 10 }}>
-          <button className={bcls('cnt', 'btn pri')} disabled={!!busyKey} onClick={() => act('cnt', () => save({ count: { on: !!cnt.on, bpm: Number(cnt.bpm) || 0, offset: Number(cnt.offset) || 0 } }, 'カウントの設定を保存しました'))}>{lbl('cnt', 'カウントの設定を保存', '✓ 保存済み')}</button>
+          <b style={{ width: 130 }}>③ 確認</b>
+          {aud && <button className={'btn pri' + (player.current && playRow === -2 ? ' play-on' : '')} onClick={() => { if (player.current && playRow === -2) { stop(); return; } playCount(); }}>{player.current && playRow === -2 ? '■ 止める' : '▶ カウント付きで確認'}</button>}
+          <label className="row" style={{ marginLeft: 'auto' }}><input type="checkbox" checked={!!cnt.on} onChange={(e) => setCnt((c) => ({ ...c, on: e.target.checked }))} />この曲にカウントを入れる</label>
+        </div>
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13 }}>微調整(歌い出しが少し早い・遅いと感じた時だけ)</summary>
+          <div className="row" style={{ marginTop: 8 }}>
+            <span>歌い出しの時刻</span>
+            <input type="number" step="0.01" value={cnt.offset} onChange={(e) => setCnt((c) => ({ ...c, offset: e.target.value }))} style={{ width: 100 }} />秒
+            <button className="btn" onClick={() => adjCount('offset', -0.02)}>少し早く(-0.02)</button>
+            <button className="btn" onClick={() => adjCount('offset', 0.02)}>少し遅く(+0.02)</button>
+            <button className="btn" onClick={() => { const v = firstLineT(); if (v != null) setCnt((c) => ({ ...c, offset: v })); }}>1行目の時刻に戻す</button>
+            <span style={{ width: '100%', height: 0 }} />
+            <span>テンポ</span>
+            <button className="btn" onClick={() => adjCount('bpm', -0.5)}>-0.5</button>
+            <button className="btn" onClick={() => adjCount('bpm', 0.5)}>+0.5</button>
+          </div>
+        </details>
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className={bcls('cnt', 'btn pri')} disabled={!!busyKey} onClick={() => act('cnt', () => save({ count: { on: !!cnt.on, bpm: Number(cnt.bpm) || 0, offset: Number(cnt.offset) || 0, beat: Number(cnt.beat) || 1 } }, 'カウントの設定を保存しました'))}>{lbl('cnt', 'カウントの設定を保存', '✓ 保存済み')}</button>
         </div>
       </div>
 

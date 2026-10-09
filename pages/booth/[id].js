@@ -81,7 +81,7 @@ export default function Booth() {
       // いきなり歌い出す曲は、曲の頭から再生する時だけ4つカウントを入れる
       const c = meta && meta.count;
       const useCount = c && c.on && Number(c.bpm) > 0 && E.time < 0.3;
-      await E.play(useCount ? { count: { bpm: Number(c.bpm), offset: Number(c.offset) || 0 } } : undefined);
+      await E.play(useCount ? { count: { bpm: Number(c.bpm), offset: Number(c.offset) || 0, beat: Number(c.beat) || 1 } } : undefined);
       setPlaying(true);
     } };
   const cycleAB = () => {
