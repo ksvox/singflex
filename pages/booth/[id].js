@@ -90,10 +90,6 @@ export default function Booth() {
   const span = open ? 3 : 10;
   const from = Math.max(0, cur - 1);
   const shown = timed ? lines.slice(from, from + span + 1).map((l, k) => ({ ...l, i: from + k })) : lines.map((l, i) => ({ ...l, i }));
-  const prog = (i) => {
-    const a = lines[i]?.t, b = lines[i + 1]?.t ?? a + 4;
-    return Math.max(0, Math.min(1, (dt - a) / Math.max(0.5, b - a)));
-  };
 
   const pos = open ? { ly: 150, seek: 476, tr: 514, dr: 584 } : { ly: 360, seek: 690, tr: 726, dr: 800 };
   const onImg = (e) => setCol(jacketColors(e.currentTarget));
@@ -135,19 +131,14 @@ export default function Booth() {
 
         <div className="abs lyrics" style={{ height: pos.ly, overflowY: timed ? 'hidden' : 'auto' }}>
           {!lines.length && <div className="ly-empty">この曲の歌詞は準備中です。</div>}
+          <div key={timed ? cur : 'all'} className={timed && cur >= 0 ? 'ly-roll' : ''} style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
           {shown.map((l) => (
             <div key={l.i} style={{ display: 'contents' }}>
               {l.start && l.sec && <div className="ly-sec">{l.sec.toUpperCase()}</div>}
-              {l.i === cur ? (
-                <button className="ly cur" onClick={() => seek(l.t)}>
-                  <span className="txt">{l.text}</span>
-                  <span className="wipe" style={{ width: prog(l.i) * 100 + '%' }}>{l.text}</span>
-                </button>
-              ) : (
-                <button className={'ly' + (l.i < cur ? ' past' : '')} onClick={() => l.t != null && seek(l.t)}>{l.text}</button>
-              )}
+              <button className={'ly' + (l.i === cur ? ' cur' : l.i < cur ? ' past' : '')} onClick={() => l.t != null && seek(l.t)}>{l.text}</button>
             </div>
           ))}
+          </div>
         </div>
 
         <div className="abs seek" style={{ top: pos.seek }}>

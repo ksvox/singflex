@@ -52,21 +52,23 @@ function draw(ctx, { img, blur, lines, jpl, t, rot, title, comment }) {
   // 歌詞(カラオケ型・歌っている行の下に和訳)
   const cur = currentLine(lines, t);
   const prev = lines[cur - 1]; const now = lines[cur]; const n1 = lines[cur + 1]; const n2 = lines[cur + 2];
-  if (prev) { ctx.font = '400 38px "Zen Kaku Gothic New", sans-serif'; ctx.fillStyle = 'rgba(245,238,252,.3)'; ctx.fillText(prev.text, W / 2, 1300, 980); }
+  // 行が変わる時に、歌詞全体がスッと上にせり上がる(0.35秒)
+  const k = now && now.t != null ? Math.max(0, Math.min(1, (t - now.t) / 0.35)) : 1;
+  const dy = (1 - k) * (1 - k) * 90;
+  if (prev) { ctx.font = '400 38px "Zen Kaku Gothic New", sans-serif'; ctx.fillStyle = 'rgba(245,238,252,.3)'; ctx.fillText(prev.text, W / 2, 1300 + dy, 980); }
   if (now) {
+    // 歌っている行は、1行まるごと光る
+    ctx.save();
     ctx.font = '500 52px Unbounded, sans-serif';
-    const p = Math.max(0, Math.min(1, (t - now.t) / Math.max(0.5, (n1?.t ?? now.t + 4) - now.t)));
-    const lw = Math.min(ctx.measureText(now.text).width, 980);
-    ctx.fillStyle = 'rgba(245,238,252,.45)'; ctx.fillText(now.text, W / 2, 1395, 980);
-    ctx.save(); ctx.beginPath(); ctx.rect(W / 2 - lw / 2, 1395 - 70, lw * p, 100); ctx.clip();
-    ctx.fillStyle = '#ff8cc6'; ctx.shadowColor = 'rgba(255,111,181,.7)'; ctx.shadowBlur = 24; ctx.fillText(now.text, W / 2, 1395, 980);
+    ctx.fillStyle = '#ff8cc6'; ctx.shadowColor = 'rgba(255,111,181,.7)'; ctx.shadowBlur = 24 * k;
+    ctx.fillText(now.text, W / 2, 1395 + dy, 980);
     ctx.restore();
     const jp = (jpl || [])[cur];
-    if (jp) { ctx.font = '500 34px "Zen Kaku Gothic New", sans-serif'; ctx.fillStyle = '#ffd9a8'; ctx.fillText(jp, W / 2, 1455, 980); }
+    if (jp) { ctx.font = '500 34px "Zen Kaku Gothic New", sans-serif'; ctx.fillStyle = '#ffd9a8'; ctx.fillText(jp, W / 2, 1455 + dy, 980); }
   }
   ctx.font = '400 40px "Zen Kaku Gothic New", sans-serif';
-  if (n1) { ctx.fillStyle = 'rgba(245,238,252,.62)'; ctx.fillText(n1.text, W / 2, 1540, 980); }
-  if (n2) { ctx.fillStyle = 'rgba(245,238,252,.45)'; ctx.fillText(n2.text, W / 2, 1620, 980); }
+  if (n1) { ctx.fillStyle = 'rgba(245,238,252,.62)'; ctx.fillText(n1.text, W / 2, 1540 + dy, 980); }
+  if (n2) { ctx.fillStyle = 'rgba(245,238,252,.45)'; ctx.fillText(n2.text, W / 2, 1620 + dy, 980); }
   // 下部リンク
   ctx.font = '500 38px Unbounded, sans-serif'; ctx.fillStyle = '#7ff5e3';
   ctx.fillText(LINK, W / 2, 1745);

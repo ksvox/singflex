@@ -119,9 +119,11 @@ button { cursor: pointer; }
 .ly-sec { font-family: 'Unbounded'; font-size: 9px; letter-spacing: 3px; color: var(--teal); margin-top: 4px; }
 .ly { background: none; border: none; padding: 0; text-align: left; color: rgba(245,238,252,.5); font-size: calc(15px * var(--fs)); line-height: 1.35; }
 .ly.past { color: rgba(245,238,252,.3); }
-.ly.cur { position: relative; font-family: 'Unbounded'; font-weight: 500; font-size: calc(17px * var(--fs)); color: rgba(245,238,252,.45); }
-.ly.cur .wipe { position: absolute; left: 0; top: 0; height: 100%; overflow: hidden; white-space: nowrap; color: #ff8cc6; text-shadow: 0 0 14px rgba(255,111,181,.6); }
-.ly.cur .txt { white-space: nowrap; display: block; overflow: hidden; text-overflow: clip; }
+.ly.cur { position: relative; font-family: 'Unbounded'; font-weight: 500; font-size: calc(17px * var(--fs)); color: #ff8cc6; text-shadow: 0 0 14px rgba(255,111,181,.6); animation: lyGlow .35s ease-out; }
+/* 次の行に変わる時、歌詞全体がスッと上にせり上がる(1行まるごと光る) */
+.ly-roll { animation: lyRoll .35s ease-out; }
+@keyframes lyRoll { from { transform: translateY(30px); opacity: .55; } to { transform: none; opacity: 1; } }
+@keyframes lyGlow { from { color: rgba(245,238,252,.6); text-shadow: none; } to { color: #ff8cc6; text-shadow: 0 0 14px rgba(255,111,181,.6); } }
 .ly-empty { font-size: 14px; color: #c9a9e6; line-height: 1.7; }
 .seek { left: 20px; width: 350px; transition: top .35s ease; }
 .seek input { width: 100%; accent-color: var(--pink); height: 24px; }
