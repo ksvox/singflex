@@ -10,7 +10,7 @@ export default function Stage({ bg = '#15100c', children }) {
   }, []);
   return (
     <div className="stage-wrap" style={{ background: bg }}>
-      <div className="stage" style={{ transform: `scale(${s})` }}>{children}</div>
+      <div className="stage" style={{ transform: `scale(${s})` }}>{children}<div className="copy">© ボーカル道場K's VOX</div></div>
     </div>
   );
 }

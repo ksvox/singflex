@@ -6,7 +6,7 @@
 ## 3つの部屋
 - `/` コントロールルーム(曲名検索・取扱説明書・Showcaseへのリンク)
 - `/booth/[id]` ブース(カラオケ)
-- `/lounge/[id]` 控え室(和訳/英語歌唱メソッドメモ=準備中)
+- `/lounge/[id]` 控え室(英語歌唱メソッドの歌詞メモ/和訳)
 
 ## デプロイナウの環境変数
 | 名前 | 中身 |
@@ -28,3 +28,5 @@
 ## データの置き場所
 - 音源・ジャケット: Cloudflare R2(非公開バケット singflex、songs/<曲ID>/vocal.mp3・track.mp3・jacket.jpg)
 - 歌詞・タイミング・コード・和訳: 門弟アプリのFirestore `singflex_songs`
+- 歌詞メモ(英語歌唱メソッドの印): `singflex_songs` の memo(管理画面で分析・手直し)。発音辞書は `public/dict/en.txt`(CMU発音辞書+単語の使用頻度から作成、AIは不使用)
+- 熟語・慣用句の一覧: 門弟アプリのFirestore `singflex_settings/main`(未保存の間は lib/client/idioms.js の初期一覧)

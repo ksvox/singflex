@@ -10,7 +10,9 @@ async function handler(req, res) {
     return {
       id: d.id, title: s.title, ep: s.ep || '', ready: !!s.ready,
       hasVocal: !!s.vocalKey, hasTrack: !!s.trackKey, hasJacket: !!s.jacketKey,
-      hasLyrics: !!(s.lines && s.lines.length), timed: !!s.timed, hasChords: !!(s.chords && s.chords.length), hasJp: !!s.jp
+      hasLyrics: !!(s.lines && s.lines.length), timed: !!s.timed, hasChords: !!(s.chords && s.chords.length), hasJp: !!s.jp,
+      hasMemo: !!(s.memo && s.memo.length), memoStale: !!(s.memo && s.memo.length) && s.memoSrc !== (s.lines || []).map((l) => l.text).join('\n'),
+      videoMadeAt: s.videoMadeAt || null
     };
   });
   songs.sort((a, b) => a.title.localeCompare(b.title));

@@ -2,7 +2,8 @@ import { handle } from '../../../lib/handle';
 import { db, SONGS, getAdmin } from '../../../lib/firebaseAdmin';
 import { isAdmin } from '../../../lib/pass';
 
-const ALLOWED = ['title', 'ep', 'ready', 'vocalKey', 'trackKey', 'jacketKey', 'lines', 'chords', 'jp', 'timed', 'rawLyrics'];
+const ALLOWED = ['title', 'ep', 'ready', 'vocalKey', 'trackKey', 'jacketKey', 'lines', 'chords', 'jp', 'timed', 'rawLyrics', 'memo', 'memoSrc', 'memoAt', 'videoJp', 'videoComment', 'videoMadeAt'];
+const MEDIA = ['vocalKey', 'trackKey', 'jacketKey'];
 
 // 作成(idなし)・更新(idあり)・削除(DELETE)
 async function handler(req, res) {
@@ -15,7 +16,8 @@ async function handler(req, res) {
   const data = {};
   for (const k of ALLOWED) if (k in body) data[k] = body[k];
   data.updatedAt = Date.now();
-  data.version = getAdmin().firestore.FieldValue.increment(1);
+  // 版の番号は音源・ジャケットを差し替えた時だけ上げる(生徒のスマホに保存した音源を入れ替えるため)
+  if (MEDIA.some((k) => k in body) || !body.id) data.version = getAdmin().firestore.FieldValue.increment(1);
   if (body.id) { await col.doc(body.id).set(data, { merge: true }); return res.json({ id: body.id }); }
   const ref = await col.add({ ready: false, ...data });
   res.json({ id: ref.id });

@@ -4,6 +4,8 @@ import Stage from '../components/Stage';
 import FontButton from '../components/FontButton';
 import Manual from '../components/Manual';
 import { ensurePass } from '../lib/client/access';
+import { authReady, viewerHeaders } from '../lib/client/firebaseClient';
+import { loadLast } from '../lib/client/song';
 
 const KNOB = ['#e2a040', '#d9d4cb', '#4fc3b8', '#d9d4cb', '#c75b4a', '#d9d4cb', '#d9d4cb'];
 const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9\u3040-\u9fff]/g, '');
@@ -15,20 +17,27 @@ export default function Home() {
   const [q, setQ] = useState('');
   const [manual, setManual] = useState(false);
   const [fly, setFly] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [last, setLast] = useState(null);
   const stageRef = useRef(null);
 
   useEffect(() => {
     (async () => {
       const ok = await ensurePass();
-      if (ok === false) { setAccess('locked'); return; }
+      const admin = !!(await authReady());
+      setIsAdmin(admin);
+      if (ok === false && !admin) { setAccess('locked'); return; }
+      let list = [];
       try {
-        const r = await fetch('/api/songs');
+        const r = await fetch('/api/songs', { headers: await viewerHeaders() });
         if (r.status === 401) { setAccess('locked'); return; }
         const j = await r.json();
-        setSongs(j.songs); localStorage.setItem('sf_songs', JSON.stringify(j.songs));
+        list = j.songs; setSongs(list); localStorage.setItem('sf_songs', JSON.stringify(list));
       } catch {
-        setSongs(JSON.parse(localStorage.getItem('sf_songs') || '[]'));
+        list = JSON.parse(localStorage.getItem('sf_songs') || '[]'); setSongs(list);
       }
+      const lp = loadLast();
+      if (lp && list.some((x) => x.id === lp.id)) setLast(lp);
       setAccess('ok');
       if (!localStorage.getItem('sf_manual_seen')) { setManual(true); localStorage.setItem('sf_manual_seen', '1'); }
     })();
@@ -69,6 +78,12 @@ export default function Home() {
             <div className="logo-k">K'S VOX RECORD</div>
             <div className="logo" style={{ marginTop: 6 }}>SingFlex</div>
             <div className="logo-sub">オリジナル曲 専用カラオケ</div>
+            {last && access === 'ok' && (
+              <button className="last-btn" onClick={() => router.push('/booth/' + last.id)}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z" /></svg>
+                前回の曲:<b>{last.title}</b>
+              </button>
+            )}
           </>)}
           {!!q && (
             <div className="sel">
@@ -77,7 +92,7 @@ export default function Home() {
               {results.slice(0, 1).map((s) => (
                 <button key={s.id} className="hit" onClick={(e) => pick(s, e)}>
                   {s.jacket ? <img src={s.jacket} alt="" /> : <span className="nojk" />}
-                  <span><span className="t">{s.title}</span>{s.ep && <div className="ep">{s.ep}</div>}</span>
+                  <span><span className="t">{s.title}</span>{s.ep && <div className="ep">{s.ep}</div>}{s.ready === false && <div className="ep" style={{ color: '#ffb38a' }}>非公開(管理者のみ表示)</div>}</span>
                 </button>
               ))}
               {results.slice(1, 3).map((s) => (
@@ -123,6 +138,7 @@ export default function Home() {
         <a className="abs showcase-tag" href="https://showcase.ksvox.net" target="_blank" rel="noreferrer"><span>K'S VOX RECORD</span><span>Showcase ↗</span></a>
 
         <FontButton className="abs" style={{ right: 12, top: 10, position: 'absolute' }} />
+        {isAdmin && <div className="abs admin-mode">管理者として表示中</div>}
 
         {access === 'locked' && (
           <div className="abs lock">このアプリは門下生専用です。<br /><a href="https://montei.ksvox.net">門弟アプリ</a>の「SingFlex」ボタンから開いてください。</div>

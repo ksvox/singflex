@@ -1,13 +1,102 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import AdminGate from '../../../components/AdminGate';
 import { adminFetch, adminHeaders } from '../../../lib/client/firebaseClient';
-import { saveSong, uploadTo, resizeJacket, adminAudio } from '../../../lib/client/admin';
+import { saveSong, uploadTo, resizeJacket, adminAudio, stampDate } from '../../../lib/client/admin';
 import { cleanLyrics, textToLines, linesToText, vocalEnvelope, fillSections, syllables } from '../../../lib/client/lyrics';
 import { estimateChords } from '../../../lib/client/chords';
 import { pdfText } from '../../../lib/client/pdf';
 import { fmt } from '../../../lib/client/song';
+import { analyzeLines, memoSource, memoSections, groupAt } from '../../../lib/client/english';
+import MemoLine, { MemoLegend } from '../../../components/MemoLine';
+
+// ---- 英語歌唱メソッドの歌詞メモ(控え室のホワイトボード)----
+const MODES = [
+  ['r', 'アクセント(赤)', '赤くしたい母音の文字を押します。もう一度押すと消えます。'],
+  ['b', '内容語(太字)', '語を押すと太字のオン/オフが切り替わります。'],
+  ['l', 'リンキング(波線)', 'つなげる2語のうち、前の語(または語と語のすき間)を押すとオン/オフ。'],
+  ['h', '難しい単語(マーカー)', '語を押すとマーカーのオン/オフが切り替わります。'],
+  ['i', '熟語・慣用句(下線)', '最初の語→最後の語の順に押すと下線でまとめます。下線の語を押すと外れます。']
+];
+function MemoEditor({ id, s, onSaved }) {
+  const lines = s.lines || [];
+  const src = memoSource(lines);
+  const fresh = !!(s.memo && s.memo.length === lines.length && s.memoSrc === src);
+  const [memo, setMemo] = useState(fresh ? s.memo : null);
+  const [mode, setMode] = useState('r');
+  const [pend, setPend] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const secs = useMemo(() => memoSections(lines), [s]);
+
+  const analyze = async () => {
+    if ((memo || s.memo) && !confirm('分析し直すと、手直しした印は消えます。よろしいですか?')) return;
+    setBusy(true); setNote('発音辞書を読み込んで分析中…');
+    try {
+      const st = await adminFetch('/api/admin/settings').catch(() => ({}));
+      setMemo(await analyzeLines(lines, st.idioms || null)); setDirty(true);
+      setNote('分析しました。おかしな印は下で手直しして、「歌詞メモを保存」を押してください。');
+    } catch (e) { setNote('分析できませんでした: ' + e.message); }
+    setBusy(false);
+  };
+  // 1行を直す(同じ歌詞の行=繰り返しのサビなどにも同じ印を付ける)
+  const edit = (i, fn) => {
+    setMemo((ms) => {
+      const n = ms.slice(); const w = n[i].w.map((t) => ({ ...t })); fn(w);
+      lines.forEach((l, j) => { n[j] = j === i || l.text === lines[i].text ? { w: w.map((t) => ({ ...t })) } : n[j]; });
+      return n;
+    });
+    setDirty(true);
+  };
+  const pick = (i, k, c) => {
+    if (mode === 'r') { if (c < 0) return; edit(i, (w) => { const t = w[k]; if (t.as != null && c >= t.as && c < t.ae) { delete t.as; delete t.ae; } else { const [a, b] = groupAt(t.t, c); t.as = a; t.ae = b; } }); }
+    else if (mode === 'b' || mode === 'h') { if (c < 0) return; edit(i, (w) => { if (w[k][mode]) delete w[k][mode]; else w[k][mode] = 1; }); }
+    else if (mode === 'l') { if (k >= memo[i].w.length - 1) return; edit(i, (w) => { if (w[k].l) delete w[k].l; else w[k].l = 1; }); }
+    else if (mode === 'i') {
+      if (c < 0) return;
+      const g = memo[i].w[k].i;
+      if (g) { edit(i, (w) => w.forEach((t) => { if (t.i === g) delete t.i; })); setPend(null); return; }
+      if (!pend || pend.i !== i) { setPend({ i, k }); setNote(`「${memo[i].w[k].t}」から。最後の語を押してください。`); return; }
+      const a = Math.min(pend.k, k); const b = Math.max(pend.k, k); setPend(null); setNote('');
+      if (a === b) return;
+      edit(i, (w) => { if (w.slice(a, b + 1).some((t) => t.i)) return; const ng = Math.max(0, ...w.map((t) => t.i || 0)) + 1; for (let x = a; x <= b; x++) w[x].i = ng; });
+    }
+  };
+  const save = async () => {
+    setBusy(true);
+    try { await saveSong({ id, memo, memoSrc: src, memoAt: Date.now() }); setDirty(false); setNote('歌詞メモを保存しました(控え室に表示されます)'); onSaved && onSaved(); }
+    catch (e) { setNote('保存できませんでした: ' + e.message); }
+    setBusy(false);
+  };
+
+  if (!lines.length) return <div className="card"><p>先に歌詞を保存してください。歌詞がない曲は、控え室に「この曲の歌詞メモは準備中です」と表示されます。</p></div>;
+  return (
+    <div className="card">
+      {!fresh && s.memo && !memo && <div className="msg">歌詞が変わったため、今の歌詞メモは控え室に表示されていません。「分析する」でもう一度作ってください。</div>}
+      <div className="row">
+        <button className="btn pri" disabled={busy} onClick={analyze}>{memo ? '分析し直す' : '分析する'}</button>
+        {memo && <button className={'btn' + (dirty ? ' pri' : '')} disabled={busy || !dirty} onClick={save}>{dirty ? '歌詞メモを保存' : '✓ 保存済み'}</button>}
+        <span style={{ fontSize: 12, color: '#7a6a54' }}>{s.memoAt && fresh ? '最終保存: ' + stampDate(s.memoAt) : ''}</span>
+      </div>
+      {note && <div className="msg">{note}</div>}
+      {memo && (<>
+        <div className="memo-tools">
+          {MODES.map(([k, label]) => <button key={k} className={'btn' + (mode === k ? ' on' : '')} onClick={() => { setMode(k); setPend(null); }}>{label}</button>)}
+        </div>
+        <p style={{ fontSize: 12, color: '#7a6a54', margin: '6px 0' }}>{MODES.find((m) => m[0] === mode)[2]} 同じ歌詞の行(繰り返しのサビなど)にも同じ印が付きます。</p>
+        <MemoLegend className="lg" />
+        {secs.map((x) => (
+          <div key={x.label}>
+            <div className="memo-sec">[{x.label}]</div>
+            {x.idx.map((i) => <MemoLine key={i} tokens={memo[i].w} className={'memo-ed' + (pend && pend.i === i ? ' pending' : '')} onPick={(k, c) => pick(i, k, c)} />)}
+          </div>
+        ))}
+      </>)}
+    </div>
+  );
+}
 
 function Editor({ id }) {
   const [s, setS] = useState(null);
@@ -176,6 +265,7 @@ function Editor({ id }) {
     <>
       <p><Link href="/admin">← 曲の一覧</Link></p>
       <h1>{s.title}</h1>
+      <p style={{ margin: '4px 0 0' }}><a className="btn" href={'/booth/' + id} target="_blank" rel="noreferrer">生徒画面で見る ↗</a></p>
       {msg && <div className="toast">{msg}</div>}
 
       <h2>基本情報</h2>
@@ -264,7 +354,13 @@ function Editor({ id }) {
           <div style={{ marginTop: 10 }}>
             {lines.map((l, i) => (
               <div key={i} ref={(el) => { rowRefs.current[i] = el; }} className={'tl' + (player.current && l.t != null && l.t <= t && (lines[i + 1]?.t ?? 1e9) > t ? ' now' : '')} style={i === tapIdx ? { boxShadow: 'inset 4px 0 0 #7a3d21' } : null}>
-                <input type="number" step="0.1" value={l.t ?? ''} onChange={(e) => setTime(i, e.target.value)} />
+                <span className="tbox">
+                  <input type="number" step="0.1" value={l.t ?? ''} onChange={(e) => setTime(i, e.target.value)} />
+                  <span className="spin">
+                    <button type="button" title="1秒進める" onClick={() => nudge(i, 1)}>▲</button>
+                    <button type="button" title="1秒戻す" onClick={() => nudge(i, -1)}>▼</button>
+                  </span>
+                </span>
                 <span>{l.start && l.sec ? <b style={{ color: '#7a3d21' }}>[{l.sec}] </b> : null}{l.text}</span>
                 <span className="row" style={{ gap: 4 }}>
                   <button className="btn" style={{ minHeight: 34, padding: '0 8px' }} onClick={() => nudge(i, -0.1)}>-0.1</button>
@@ -313,8 +409,14 @@ function Editor({ id }) {
         </div>
       </div>
 
+      <h2>英語歌唱メソッドの歌詞メモ(控え室)</h2>
+      <MemoEditor key={(s.memoAt || 0) + ':' + memoSource(s.lines)} id={id} s={s} onSaved={load} />
+
       <h2>リリックビデオ</h2>
-      <div className="card"><Link className="btn pri" href={'/admin/video/' + id}>リリックビデオを作る</Link></div>
+      <div className="card row">
+        <Link className="btn pri" href={'/admin/video/' + id}>リリックビデオを作る</Link>
+        {s.videoMadeAt && <span className="stamp sm" title={'生成済み ' + stampDate(s.videoMadeAt)}>生成済<br />{new Date(s.videoMadeAt).getMonth() + 1}/{new Date(s.videoMadeAt).getDate()}</span>}
+      </div>
     </>
   );
 }

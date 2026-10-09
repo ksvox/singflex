@@ -191,3 +191,46 @@ button { cursor: pointer; }
 .adm .toast { position: fixed; left: 50%; bottom: 150px; transform: translateX(-50%); z-index: 50; max-width: min(92vw, 640px); padding: 12px 18px; border-radius: 10px; background: #2a1d12; color: #fff4e6; font-size: 14px; line-height: 1.6; box-shadow: 0 6px 24px rgba(0,0,0,.25); animation: toastIn .2s ease-out; white-space: pre-line; }
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .adm .seek { width: 100%; accent-color: #7a3d21; margin: 4px 0 8px; }
+
+/* ---- 控え室: 英語歌唱メソッドの歌詞メモ ---- */
+.board-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
+.board-wrap .board-body { flex: 1; min-height: 0; }
+.memo-secs { display: flex; gap: 6px; padding: 2px 12px 6px; overflow-x: auto; scrollbar-width: none; flex: none; }
+.memo-secs::-webkit-scrollbar { display: none; }
+.msec { flex: none; height: 32px; padding: 0 12px; border-radius: 16px; border: 1px dashed #2d3a8c; background: transparent; color: #2d3a8c; font-family: 'Kalam', cursive; font-size: 13px; white-space: nowrap; }
+.msec.on { background: #2d3a8c; color: #fff; border-style: solid; }
+.memo { padding-right: 34px; }
+.memo-line { font-family: 'Kalam', cursive; font-weight: 400; font-size: calc(17px * var(--fs)); line-height: 2.15; color: #1e1e1e; }
+.board-scroll { position: absolute; right: 6px; top: 6px; bottom: 6px; width: 34px; display: flex; flex-direction: column; justify-content: space-between; }
+.board-scroll button { width: 34px; height: 44px; border-radius: 10px; border: 1px solid #2d3a8c; background: rgba(247,248,246,.94); color: #2d3a8c; font-size: 14px; }
+.board-scroll button:disabled { opacity: .25; }
+.memo-legend { flex: none; display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 6px 12px 8px; border-top: 1px dashed #c6c9cf; font-size: 10px; color: #444; }
+.lg-item { display: inline-flex; align-items: baseline; gap: 4px; }
+.lg-item > span { font-family: 'Kalam', cursive; font-size: 13px; }
+
+/* ---- 前回の曲・管理者表示・コピーライト ---- */
+.last-btn { margin-top: 12px; max-width: 250px; min-height: 36px; padding: 4px 12px; border-radius: 18px; border: 1px solid #3e6b68; background: rgba(79,195,184,.12); color: #bff3ec; font-size: calc(12px * var(--fs)); display: inline-flex; align-items: center; gap: 6px; }
+.last-btn b { font-family: 'Unbounded'; font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.admin-mode { left: 12px; top: 12px; padding: 4px 10px; border-radius: 12px; background: #7a3d21; color: #fff; font-size: 10px; z-index: 6; }
+.copy { position: absolute; right: 10px; bottom: 3px; font-size: 9px; letter-spacing: .5px; color: rgba(255,255,255,.42); pointer-events: none; z-index: 30; }
+
+/* ---- 管理画面: 歌詞メモの手直し・時間欄 ---- */
+.adm .memo-tools { display: flex; gap: 6px; flex-wrap: wrap; position: sticky; top: 0; background: #fff; padding: 8px 0; z-index: 5; border-bottom: 1px solid #eadfcd; }
+.adm .memo-tools .btn.on { background: #2d3a8c; border-color: #2d3a8c; color: #fff; }
+.adm .memo-sec { font-weight: 700; color: #7a3d21; margin: 14px 0 2px; font-size: 13px; }
+.adm .memo-ed { font-family: 'Kalam', cursive; font-size: 20px; line-height: 2.2; user-select: none; }
+.adm .memo-ed .pending { outline: 2px solid #2d3a8c; }
+.adm .lg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin: 6px 0; }
+.adm .tl { grid-template-columns: 112px 1fr auto; }
+.adm .tl .tbox { display: flex; align-items: stretch; gap: 2px; }
+.adm .tl .tbox input { min-width: 0; -moz-appearance: textfield; }
+.adm .tl .tbox input::-webkit-outer-spin-button, .adm .tl .tbox input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.adm .tl .spin { display: flex; flex-direction: column; }
+.adm .tl .spin button { width: 26px; height: 17px; padding: 0; border: 1px solid #cdbfa8; background: #fffdf9; color: #7a3d21; font-size: 9px; line-height: 1; cursor: pointer; }
+.adm .tl .spin button:first-child { border-radius: 6px 6px 0 0; } .adm .tl .spin button:last-child { border-radius: 0 0 6px 6px; border-top: none; }
+.adm .stamp { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #c0392b; color: #c0392b; border-radius: 50%; transform: rotate(-12deg); font-weight: 700; line-height: 1.15; text-align: center; }
+.adm .stamp.big { width: 104px; height: 104px; font-size: 17px; }
+.adm .stamp.big small { font-size: 10px; }
+.adm .stamp.sm { width: 46px; height: 46px; font-size: 9px; border-width: 1.5px; }
+.adm .jp-tbl td { padding: 4px 6px; }
+.adm .jp-tbl input { padding: 6px; font-size: 13px; }

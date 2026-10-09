@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import Stage from '../../components/Stage';
@@ -6,13 +6,28 @@ import FontButton from '../../components/FontButton';
 import { DoorIcon } from '../../components/Door';
 import { getSongMeta } from '../../lib/client/song';
 import { loadMeta } from '../../lib/client/cache';
+import { memoSections } from '../../lib/client/english';
+import MemoLine, { MemoLegend } from '../../components/MemoLine';
 
 export default function Lounge() {
   const { query } = useRouter();
   const id = query.id;
   const [meta, setMeta] = useState(null);
-  const [tab, setTab] = useState('jp');
+  const [tab, setTab] = useState('memo');
+  const [sec, setSec] = useState(0);
+  const [more, setMore] = useState({ up: false, down: false });
+  const body = useRef(null);
   useEffect(() => { if (id) { setMeta(loadMeta(id)); getSongMeta(id).then((m) => m && !m.locked && setMeta(m)); } }, [id]);
+
+  const lines = meta?.lines || [];
+  const memo = meta?.memo && meta.memo.length === lines.length ? meta.memo : null;
+  const secs = useMemo(() => (memo ? memoSections(lines) : []), [meta]);
+  const cur = secs[Math.min(sec, secs.length - 1)];
+
+  // 長い歌詞は右端のボタンでスクロール
+  const check = () => { const el = body.current; if (!el) return; setMore({ up: el.scrollTop > 4, down: el.scrollTop + el.clientHeight < el.scrollHeight - 4 }); };
+  useEffect(() => { const el = body.current; if (el) el.scrollTop = 0; setTimeout(check, 50); }, [tab, sec, meta]);
+  const scrollBy = (d) => { const el = body.current; if (el) el.scrollBy({ top: d * (el.clientHeight - 40), behavior: 'smooth' }); };
 
   return (
     <Stage bg="#15100c">
@@ -37,10 +52,26 @@ export default function Lounge() {
             <button className={'tab' + (tab === 'jp' ? ' on' : '')} onClick={() => setTab('jp')}>和訳</button>
             <div className="board-title">{meta?.title}</div>
           </div>
-          <div className="board-body">
-            {tab === 'memo' && <div className="prep">英語歌唱メソッドの歌詞メモは<br />ただいま準備中です。</div>}
-            {tab === 'jp' && (meta?.jp ? <div className="hand-jp">{meta.jp}</div> : <div className="prep">この曲の和訳はありません。</div>)}
+          {tab === 'memo' && memo && secs.length > 0 && (
+            <div className="memo-secs">
+              {secs.map((x, k) => <button key={k} className={'msec' + (k === sec ? ' on' : '')} onClick={() => setSec(k)}>{x.label}</button>)}
+            </div>
+          )}
+          <div className="board-wrap">
+            <div className="board-body" ref={body} onScroll={check}>
+              {tab === 'memo' && (memo && cur
+                ? <div className="memo">{cur.idx.map((i) => <MemoLine key={i} tokens={memo[i].w} className="memo-line" />)}</div>
+                : <div className="prep">この曲の歌詞メモは準備中です。</div>)}
+              {tab === 'jp' && (meta?.jp ? <div className="hand-jp">{meta.jp}</div> : <div className="prep">この曲の和訳はありません。</div>)}
+            </div>
+            {(more.up || more.down) && (
+              <div className="board-scroll">
+                <button onClick={() => scrollBy(-1)} disabled={!more.up} aria-label="上へ">▲</button>
+                <button onClick={() => scrollBy(1)} disabled={!more.down} aria-label="下へ">▼</button>
+              </div>
+            )}
           </div>
+          {tab === 'memo' && memo && <MemoLegend className="memo-legend" />}
         </div></div>
         <div className="abs tray" />
         <div className="abs marker" style={{ left: 92, background: '#d0342c' }} /><div className="abs marker" style={{ left: 130, background: '#2d3a8c' }} /><div className="abs marker" style={{ left: 168, background: '#222' }} />

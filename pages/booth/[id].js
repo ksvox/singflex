@@ -5,7 +5,7 @@ import Stage from '../../components/Stage';
 import FontButton from '../../components/FontButton';
 import { DoorIcon } from '../../components/Door';
 import { ensurePass } from '../../lib/client/access';
-import { getSongMeta, getSongFiles, fmt } from '../../lib/client/song';
+import { getSongMeta, getSongFiles, fmt, saveLast } from '../../lib/client/song';
 import { KaraokeEngine } from '../../lib/client/engine';
 import { currentLine, sectionMarks } from '../../lib/client/lyrics';
 import { chordAt, transpose } from '../../lib/client/chords';
@@ -42,6 +42,7 @@ export default function Booth() {
       if (!m) { setStatus({ error: 'この曲を開けませんでした。ネットにつないでもう一度開いてください。' }); return; }
       if (m.locked) { setStatus({ error: '門弟アプリの「SingFlex」ボタンから開き直してください。' }); return; }
       setMeta(m);
+      saveLast(m);
       try {
         const files = await getSongFiles(m, (step) => alive && setStatus({ step, text: ['ボーカルを読み込み中…', '伴奏を読み込み中…', 'ジャケットを読み込み中…', '準備しています…'][step] }));
         if (files.jacket) setJk(URL.createObjectURL(files.jacket));
